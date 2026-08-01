@@ -1,35 +1,4 @@
-.section .text
-.globl _start
 
-# --- COMPILE-TIME CONSTANTS ---
-.equ PAYLOAD_OFFSET, (payload_start - _start)
-.equ PAYLOAD_SIZE,   (payload_end - payload_start)
-
-_start:
-	# Bootloader setup...
-	auipc	t0, 0
-	addi	t0, t0, %lo(PAYLOAD_OFFSET)
-	lui	t1, 0x00040
-	addi	t3, zero, %lo(PAYLOAD_SIZE)
-	add	t2, t0, t3
-
-copy_loop:
-	bge	t0, t2, jump_to_ram
-	lw	t3, 0(t0)
-	sw	t3, 0(t1)
-	addi	t0, t0, 4
-	addi	t1, t1, 4
-	j	copy_loop
-
-jump_to_ram:
-	lui	t1, 0x00040
-	jalr	zero, 0(t1)
-
-# =====================================================================
-# --- PAYLOAD START (RAM Execution) ---
-# =====================================================================
-.align 4
-payload_start:
 	# MMIO Page Register (GrRAM Page: 0x000A0000 - 0x000A0003)
 	lui	s8, 0x000A0                  # MMIO Page Register Base (0x000A0000)
 
@@ -178,5 +147,3 @@ fast_draw_4x4:
 	sw	a2, 12(t4)
 
 	jalr	zero, 0(ra)
-
-payload_end:
