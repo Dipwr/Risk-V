@@ -1,0 +1,176 @@
+/* ============================================================================
+ * RV32I BARE-METAL SYSTEM REFERENCE & STARTER TEMPLATE
+ * Target: Custom RV32I Processor Core (Simulated in Verilator + SDL2)
+ * Load Address: 0x00040000 (Unified RAM via Wozmon)
+ * Stack Pointer: 0x0007FFF0
+ * ============================================================================
+ *
+ * SYSTEM MEMORY MAP:
+ * Region          | Base Address | End Address | Size   | Access | Description
+ * ----------------|--------------|-------------|--------|--------|------------------------------
+ * Boot ROM        | 0x00000000   | 0x0003FFFF  | 256 KB | R      | Wozmon & Font Bitmaps
+ * Unified RAM     | 0x00040000   | 0x0007FFFF  | 256 KB | R/W    | Program Executable & Stack
+ * Standard MMIO   | 0x00080000   | 0x00081FFF  | 8 KB   | R/W    | Hardware Registers
+ * Graphics Page 0 | 0x00082000   | 0x000C07FF  |~256 KB | R/W    | Front Framebuffer (320x200)
+ * Graphics Page 1 | 0x000C0800   | 0x000FEFFF  |~256 KB | R/W    | Back Framebuffer (320x200)
+ *
+ * MMIO REGISTERS:
+ * PAGE_REG (0x00080000): Write 0 for Page 0, 1 for Page 1 display presentation.
+ * TERM_OUT (0x00080004): Write ASCII character byte to output to terminal.
+ * KEY_DATA (0x00080020): Read ASCII byte from keyboard buffer FIFO.
+ * KEY_STAT (0x00080024): Read status (1 = Key Available, 0 = Buffer Empty).
+ * GRAPHIC_RAM (0x00082000): Start of 32-bit word VRAM array.
+ *
+ * The GRAPHIC_RAM uses 16 bit color, each pixel occupies a 32 bit word and its color 
+ * data is stored in the least significant 16 bits. The color data is parsed according to
+ * hneemann's digital simulator: "The palette used is structured as follows: The indices 0-9 
+ * correspond to the colors white, black, red, green, blue, yellow, cyan, magenta, orange and pink. 
+ * The indices 32-63 map gray values and the indices 64-127 represent 64 color values each 
+ * with two bits per color channel. This results in a simple palette that can be addressed 
+ * with only 7-bit. If the architecture supports a 16-bit index, from Index 0x8000, 
+ * a high-color mode with 5 bits per color channel can be used, which enables 32768 colors."
+ *
+ * DEVELOPER NOTE ON SOFTWARE MATH HELPERS:
+ * This guide serves as a template reference. Because programs compile with
+ * `-nostdlib`, there is no automatic runtime library linked.
+ * * The math functions included below (__mulsi3, __divsi3, __modsi3, __muldi3, __divdi3)
+ * are template implementations. Copy and paste ONLY the specific helpers your 
+ * program actually uses into your source code. If your project doesn't perform 64-bit 
+ * math, you do not need to include __muldi3 or __divdi3.
+ * ============================================================================ */
+
+#include <stdint.h>
+
+#define PAGE_REG     ((volatile uint32_t *)0x00080000)
+#define TERM_OUT     ((volatile uint32_t *)0x00080004)
+#define KEY_DATA     ((volatile uint32_t *)0x00080020)
+#define KEY_STAT     ((volatile uint32_t *)0x00080024)
+#define GRAPHIC_RAM  ((volatile uint32_t *)0x00082000)
+
+#define SCREEN_WIDTH  320
+#define SCREEN_HEIGHT 200
+#define PAGE_WORDS    (SCREEN_WIDTH * SCREEN_HEIGHT) // 64,000 words per page
+
+#define MAKE_RGB(r, g, b) (0x8000 | (((r) & 0x1F) << 10) | (((g) & 0x1F) << 5) | ((b) & 0x1F))
+
+#define COLOR_BLACK  0x8000
+#define COLOR_WHITE  MAKE_RGB(31, 31, 31)
+
+// ----------------------------------------------------------------------------
+// MATH HELPER TEMPLATES (Copy relevant functions into your code as needed)
+// ----------------------------------------------------------------------------
+
+// 32-bit Integer Multiply (Needed if using standard 32-bit multiplication)
+int __mulsi3(int a, int b) {
+    int res = 0;
+    int neg = (a < 0) ^ (b < 0);
+    unsigned int ua = (a < 0) ? -a : a;
+    unsigned int ub = (b < 0) ? -b : b;
+    while (ub > 0) {
+        if (ub & 1) res += ua;
+        ua <<= 1;
+        ub >>= 1;
+    }
+    return neg ? -res : res;
+}
+
+// 32-bit Integer Divide (Needed if using standard 32-bit division '/')
+int __divsi3(int a, int b) {
+    if (b == 0) return 0;
+    int neg = (a < 0) ^ (b < 0);
+    unsigned int num = (a < 0) ? -a : a;
+    unsigned int den = (b < 0) ? -b : b;
+    unsigned int quot = 0, rem = 0;
+    for (int i = 31; i >= 0; i--) {
+        rem = (rem << 1) | ((num >> i) & 1);
+        if (rem >= den) {
+            rem -= den;
+            quot |= (1U << i);
+        }
+    }
+    return neg ? -(int)quot : (int)quot;
+}
+
+// 32-bit Integer Modulo (Needed if using '%')
+int __modsi3(int a, int b) {
+    if (b == 0) return 0;
+    int q = __divsi3(a, b);
+    return a - __mulsi3(q, b);
+}
+
+// 64-bit Integer Multiply (Needed if multiplying int64_t or doing 64-bit fixed-point mul)
+int64_t __muldi3(int64_t a, int64_t b) {
+    int neg = (a < 0) ^ (b < 0);
+    uint64_t ua = (a < 0) ? -a : a;
+    uint64_t ub = (b < 0) ? -b : b;
+    uint64_t res = 0;
+    while (ub > 0) {
+        if (ub & 1) res += ua;
+        ua <<= 1;
+        ub >>= 1;
+    }
+    return neg ? -(int64_t)res : (int64_t)res;
+}
+
+// 64-bit Integer Divide (Needed if dividing int64_t or doing 64-bit fixed-point div)
+int64_t __divdi3(int64_t a, int64_t b) {
+    if (b == 0) return 0;
+    int neg = (a < 0) ^ (b < 0);
+    uint64_t num = (a < 0) ? -a : a;
+    uint64_t den = (b < 0) ? -b : b;
+    uint64_t quot = 0, rem = 0;
+    for (int i = 63; i >= 0; i--) {
+        rem = (rem << 1) | ((num >> i) & 1);
+        if (rem >= den) {
+            rem -= den;
+            quot |= (1ULL << i);
+        }
+    }
+    return neg ? -(int64_t)quot : (int64_t)quot;
+}
+
+// ----------------------------------------------------------------------------
+// FRAMEBUFFER GRAPHICS DRAWING HELPERS
+// ----------------------------------------------------------------------------
+static inline void put_pixel(int page, int x, int y, uint32_t color) {
+    if (x >= 0 && x < SCREEN_WIDTH && y >= 0 && y < SCREEN_HEIGHT) {
+        uint32_t offset = (page * PAGE_WORDS) + (y * SCREEN_WIDTH) + x;
+        GRAPHIC_RAM[offset] = color;
+    }
+}
+
+void clear_screen(int page, uint32_t color) {
+    uint32_t offset = page * PAGE_WORDS;
+    for (int i = 0; i < PAGE_WORDS; i++) {
+        GRAPHIC_RAM[offset + i] = color;
+    }
+}
+
+void print_string(const char *str) {
+    while (*str) {
+        *TERM_OUT = (uint32_t)(*str++);
+    }
+}
+
+// ----------------------------------------------------------------------------
+// SKELETON ENTRY POINT
+// ----------------------------------------------------------------------------
+int main(void) {
+    uint32_t active_page = 0;
+    print_string("[RV32I Core] Program execution started in RAM.\n");
+
+    clear_screen(0, COLOR_BLACK);
+    clear_screen(1, COLOR_BLACK);
+
+    while (1) {
+        uint32_t back_page = active_page ^ 1;
+
+        // Render application graphics into back_page here...
+
+        *PAGE_REG = back_page;
+        active_page = back_page;
+    }
+
+    *PAGE_REG = 0;
+    return 0; // Return execution back to Wozmon (0x00000000), add the return to wozmon on a key press if possible/applicable.
+}

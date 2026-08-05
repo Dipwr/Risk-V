@@ -1,0 +1,419 @@
+.equ GRAPHIC_RAM,   0x00080000
+.equ KEY_DATA_ADDR, 0x000A0020
+.equ KEY_STAT_ADDR, 0x000A0024
+.equ RAM_BASE_ADDR, 0x00040000
+
+.equ COLOR_TEXT,    0x8000		# Solid Black text (0x8000)
+.equ COLOR_BG,      0xFFFF		# Solid White background (0xFFFF)
+
+.section .text
+.globl _start
+
+_start:
+	# Initialize RAM Base Pointer
+	li	s0, RAM_BASE_ADDR
+
+	# Persistent constants, loaded once so the hot rendering loops below
+	# never have to reload them (COLOR_BG in particular is a 2-instruction
+	# lui+addi load every time it's fetched with li, so this matters).
+	li	s5, GRAPHIC_RAM		# Graphic RAM base address
+	li	s8, COLOR_BG		# Background color
+	li	s9, COLOR_TEXT		# Text color
+
+	# 1. Clear Graphic RAM Screen
+	jal	t6, clear_screen_sub
+
+	# 2. Reset Cursor Grid Position (Col 0, Row 0)
+	li	s10, 0			# Cursor X (0..31)
+	li	s11, 0			# Cursor Y (0..15)
+
+print_prompt:
+	# Output Newline sequence: '>', ' '
+	li	a0, '>'
+	jal	ra, draw_char
+	li	a0, ' '
+	jal	ra, draw_char
+
+	# Reset Accumulator & Flags
+	li	s1, 0			# Parsed Hex Accumulator
+	li	s2, 0			# Digit Flag
+
+read_char_loop:
+	# Poll Keyboard
+	li	t1, KEY_STAT_ADDR
+poll_key:
+	lw	t2, 0(t1)
+	andi	t2, t2, 0x1
+	beqz	t2, poll_key
+
+	# Read ASCII character
+	li	t1, KEY_DATA_ADDR
+	lbu	a0, 0(t1)
+
+	# Convert Lowercase to Uppercase for Font Renderer
+	li	t0, 'a'
+	blt	a0, t0, skip_upper
+	li	t0, 'z'
+	bgt	a0, t0, skip_upper
+	addi	a0, a0, -32		# Convert 'a'-'z' to 'A'-'Z'
+skip_upper:
+
+	# Echo character to Graphic RAM
+	jal	ra, draw_char
+
+	# Check for Enter ('\r' / '\n')
+	li	t0, 0x0D
+	beq	a0, t0, handle_enter
+	li	t0, 0x0A
+	beq	a0, t0, handle_enter
+
+	# Check for Colon (':')
+	li	t0, ':'
+	beq	a0, t0, handle_colon
+
+	# Check for 'R' / 'r'
+	li	t0, 'R'
+	beq	a0, t0, handle_run
+
+	# Hex Parsing ('0'-'9', 'A'-'F')
+	li	t0, '0'
+	blt	a0, t0, read_char_loop
+	li	t0, '9'
+	bgt	a0, t0, try_hex_alpha
+	addi	t0, a0, -'0'
+	j	append_nibble
+
+try_hex_alpha:
+	li	t0, 'A'
+	blt	a0, t0, read_char_loop
+	li	t0, 'F'
+	bgt	a0, t0, read_char_loop
+	addi	t0, a0, -55
+
+append_nibble:
+	andi	t0, t0, 0xF
+	slli	s1, s1, 4
+	or	s1, s1, t0
+	li	s2, 1
+	j	read_char_loop
+
+
+# =====================================================================
+# COMMAND HANDLERS
+# =====================================================================
+
+handle_enter:
+	beqz	s2, do_read_mem
+	mv	s0, s1
+
+do_read_mem:
+	li	a0, ':'
+	jal	ra, draw_char
+	li	a0, ' '
+	jal	ra, draw_char
+
+	# Use s3 and s4 so draw_char doesn't clobber the loop values!
+	lw	s3, 0(s0)		# Read 32-bit word from RAM
+
+	# Print 8 hex digits to screen
+	li	s4, 28
+print_word_loop:
+	srl	t0, s3, s4
+	andi	t0, t0, 0xF
+	li	t1, 10
+	blt	t0, t1, is_num
+	addi	t0, t0, 55
+	j	out_nibble
+is_num:
+	addi	t0, t0, '0'
+out_nibble:
+	mv	a0, t0
+	jal	ra, draw_char
+	addi	s4, s4, -4
+	bge	s4, zero, print_word_loop
+
+	addi	s0, s0, 4
+	j	char_newline_then_prompt
+
+
+handle_colon:
+	beqz	s2, write_mode_loop
+	mv	s0, s1
+
+write_mode_loop:
+	li	s1, 0
+
+parse_val_loop:
+	li	t1, KEY_STAT_ADDR
+poll_val_key:
+	lw	t2, 0(t1)
+	andi	t2, t2, 0x1
+	beqz	t2, poll_val_key
+
+	li	t1, KEY_DATA_ADDR
+	lbu	a0, 0(t1)
+
+	# Convert Lowercase to Uppercase
+	li	t0, 'a'
+	blt	a0, t0, skip_upper_val
+	li	t0, 'z'
+	bgt	a0, t0, skip_upper_val
+	addi	a0, a0, -32
+skip_upper_val:
+
+	jal	ra, draw_char
+
+	li	t0, ' '
+	beq	a0, t0, commit_write
+	li	t0, 0x0D
+	beq	a0, t0, commit_write_end
+	li	t0, 0x0A
+	beq	a0, t0, commit_write_end
+
+	li	t0, '0'
+	blt	a0, t0, parse_val_loop
+	li	t0, '9'
+	bgt	a0, t0, try_val_alpha
+	addi	t0, a0, -'0'
+	j	shift_val_nibble
+
+try_val_alpha:
+	li	t0, 'A'
+	blt	a0, t0, parse_val_loop
+	li	t0, 'F'
+	bgt	a0, t0, parse_val_loop
+	addi	t0, a0, -55
+
+shift_val_nibble:
+	andi	t0, t0, 0xF
+	slli	s1, s1, 4
+	or	s1, s1, t0
+	j	parse_val_loop
+
+commit_write:
+	sw	s1, 0(s0)
+	addi	s0, s0, 4
+	j	write_mode_loop
+
+commit_write_end:
+	sw	s1, 0(s0)
+	addi	s0, s0, 4
+	j	char_newline_then_prompt
+
+
+handle_run:
+	beqz	s2, execute_jump
+	mv	s0, s1
+
+execute_jump:
+	# Reset cursor to top-left and clear the screen before handing off execution
+	li	s10, 0
+	li	s11, 0
+	jal	t6, clear_screen_sub
+
+	li	ra, 0x00000000		# Set return address for soft-boot back to Wozmon
+	jr	s0
+
+char_newline_then_prompt:
+	jal	ra, char_newline
+	j	print_prompt
+
+
+# =====================================================================
+# GRAPHIC FONT ENGINE & SUBROUTINES (4x5 Pixel Grid)
+# =====================================================================
+
+# Clears the entire Graphic RAM to COLOR_BG. Returns via t6.
+# Unrolled 8x: turns 16000 iterations of a 4-instruction loop into 2000
+# iterations of an 11-instruction loop, so the addi/addi/bnez bookkeeping
+# is paid once per 8 pixels instead of once per pixel.
+clear_screen_sub:
+	mv	t0, s5			# t0 = GRAPHIC_RAM
+	li	t1, 2000		# 16000 pixels / 8 per iteration
+clear_loop:
+	sw	s8, 0(t0)
+	sw	s8, 4(t0)
+	sw	s8, 8(t0)
+	sw	s8, 12(t0)
+	sw	s8, 16(t0)
+	sw	s8, 20(t0)
+	sw	s8, 24(t0)
+	sw	s8, 28(t0)
+	addi	t0, t0, 32
+	addi	t1, t1, -1
+	bnez	t1, clear_loop
+	jr	t6
+
+# Renders ASCII character in a0 to Graphic RAM
+draw_char:
+	# Handle Newline ('\n' or '\r')
+	li	t0, 0x0A
+	beq	a0, t0, char_newline
+	li	t0, 0x0D
+	beq	a0, t0, char_newline
+
+	# Space is by far the most common character while loading hex data,
+	# and it renders as pure background. The cursor only ever advances
+	# into cells that are already blank (nothing here ever backspaces or
+	# redraws a cell), so drawing a space is always a no-op -- skip the
+	# glyph lookup and all 20 pixel writes and just advance the cursor.
+	li	t0, ' '
+	beq	a0, t0, draw_char_advance
+
+	# Fetch 20-bit Glyph Bitmap into a1
+	jal	t6, get_glyph
+
+	# Pixel Base X = s10 * 5, Base Y = s11 * 6
+	slli	t0, s10, 2		# X * 4
+	add	t0, t0, s10		# X * 5 (BaseX)
+	slli	t1, s11, 2		# Y * 4
+	slli	t2, s11, 1		# Y * 2
+	add	t1, t1, t2		# Y * 6 (BaseY)
+
+	# t4 = address of this char's top-left pixel:
+	#      GRAPHIC_RAM + (BaseY*160 + BaseX) * 4
+	# Computed once per character instead of once per pixel -- the old
+	# code redid this whole computation from scratch for every one of
+	# the 20 pixels.
+	slli	t4, t1, 7		# BaseY * 128
+	slli	t5, t1, 5		# BaseY * 32
+	add	t4, t4, t5		# BaseY * 160
+	add	t4, t4, t0		# + BaseX
+	slli	t4, t4, 2		# -> byte offset
+	add	t4, t4, s5		# + GRAPHIC_RAM
+
+	# Bit index tracker starting at bit 19 (MSB for 20-bit font)
+	li	a7, 19
+	li	t2, 0			# Row counter (0..4)
+
+	# Draw 4x5 matrix. The 4 columns are fully unrolled (no loop
+	# overhead), and each pixel's address is just row_addr + a small
+	# constant offset instead of a full recompute. t4 advances by 640
+	# bytes (= 160 pixels * 4) once per row to reach the next row down.
+draw_row:
+	srl	t5, a1, a7
+	andi	t5, t5, 1
+	beqz	t5, dc_bg0
+	sw	s9, 0(t4)
+	j	dc_next0
+dc_bg0:
+	sw	s8, 0(t4)
+dc_next0:
+	addi	a7, a7, -1
+
+	srl	t5, a1, a7
+	andi	t5, t5, 1
+	beqz	t5, dc_bg1
+	sw	s9, 4(t4)
+	j	dc_next1
+dc_bg1:
+	sw	s8, 4(t4)
+dc_next1:
+	addi	a7, a7, -1
+
+	srl	t5, a1, a7
+	andi	t5, t5, 1
+	beqz	t5, dc_bg2
+	sw	s9, 8(t4)
+	j	dc_next2
+dc_bg2:
+	sw	s8, 8(t4)
+dc_next2:
+	addi	a7, a7, -1
+
+	srl	t5, a1, a7
+	andi	t5, t5, 1
+	beqz	t5, dc_bg3
+	sw	s9, 12(t4)
+	j	dc_next3
+dc_bg3:
+	sw	s8, 12(t4)
+dc_next3:
+	addi	a7, a7, -1
+
+	addi	t4, t4, 640		# Next row down (160 pixels * 4 bytes)
+	addi	t2, t2, 1
+	li	t5, 5			# We loop 5 rows
+	blt	t2, t5, draw_row
+
+	# Advance Cursor Position
+draw_char_advance:
+	addi	s10, s10, 1
+	li	t0, 32
+	blt	s10, t0, draw_char_done
+
+char_newline:
+	li	s10, 0			# Reset X
+	addi	s11, s11, 1		# Y++
+	li	t0, 16
+	blt	s11, t0, draw_char_done	# If Y < 16, do nothing and return
+	
+	# Cursor has reached the bottom of the screen! Wrap and clear.
+	li	s11, 0			# Reset Y to top row
+	jal	t6, clear_screen_sub	# Clear the screen
+
+draw_char_done:
+	jr	ra
+
+
+# Returns 20-bit Bitmap in a1 for ASCII in a0 (Beautiful 4x5 Font)
+get_glyph:
+	li	t0, '0'
+	beq	a0, t0, g_0
+	li	t0, '1'
+	beq	a0, t0, g_1
+	li	t0, '2'
+	beq	a0, t0, g_2
+	li	t0, '3'
+	beq	a0, t0, g_3
+	li	t0, '4'
+	beq	a0, t0, g_4
+	li	t0, '5'
+	beq	a0, t0, g_5
+	li	t0, '6'
+	beq	a0, t0, g_6
+	li	t0, '7'
+	beq	a0, t0, g_7
+	li	t0, '8'
+	beq	a0, t0, g_8
+	li	t0, '9'
+	beq	a0, t0, g_9
+	li	t0, 'A'
+	beq	a0, t0, g_A
+	li	t0, 'B'
+	beq	a0, t0, g_B
+	li	t0, 'C'
+	beq	a0, t0, g_C
+	li	t0, 'D'
+	beq	a0, t0, g_D
+	li	t0, 'E'
+	beq	a0, t0, g_E
+	li	t0, 'F'
+	beq	a0, t0, g_F
+	li	t0, 'R'
+	beq	a0, t0, g_R
+	li	t0, ':'
+	beq	a0, t0, g_colon
+	li	t0, '>'
+	beq	a0, t0, g_gt
+g_space:
+	li	a1, 0x00000; jr t6
+g_0:	li	a1, 0x69996; jr t6
+g_1:	li	a1, 0x4C44E; jr t6
+g_2:	li	a1, 0x6924F; jr t6
+g_3:	li	a1, 0xF161F; jr t6
+g_4:	li	a1, 0x99F11; jr t6
+g_5:	li	a1, 0xF8E1E; jr t6
+g_6:	li	a1, 0x78E96; jr t6
+g_7:	li	a1, 0xF1244; jr t6
+g_8:	li	a1, 0x69696; jr t6
+g_9:	li	a1, 0x69716; jr t6
+g_A:	li	a1, 0x69F99; jr t6
+g_B:	li	a1, 0xE9E9E; jr t6
+g_C:	li	a1, 0x69896; jr t6
+g_D:	li	a1, 0xE999E; jr t6
+g_E:	li	a1, 0xF8E8F; jr t6
+g_F:	li	a1, 0xF8E88; jr t6
+g_R:	li	a1, 0xE9EA9; jr t6
+g_colon:li	a1, 0x02020; jr t6
+g_gt:	li	a1, 0x84248; jr t6
