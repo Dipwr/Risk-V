@@ -11,241 +11,210 @@
 #include <SDL.h>
 #endif
 
-// Framebuffer dimensions (320x200)
-#define FB_WIDTH 320
-#define FB_HEIGHT 200
-#define PAGE_SIZE_WORDS (FB_WIDTH * FB_HEIGHT) // 64,000 words per page (256 KB)
+// ============================================================================
+// FRAMEBUFFER CONFIGURATION (320x200, 16-Bit RGB565 Color)
+// ============================================================================
+#define FB_WIDTH	320
+#define FB_HEIGHT	200
+#define PIXELS_PER_PAGE	(FB_WIDTH * FB_HEIGHT)
+#define PAGE_SIZE_BYTES	(PIXELS_PER_PAGE * 2)
 
-// 128,000 32-bit words total (512 KB total for Page 0 + Page 1)
-uint32_t gr_ram[PAGE_SIZE_WORDS * 2] = {0};
+#define VRAM_BASE_ADDR	0x00082000
+#define VRAM_END_ADDR	(VRAM_BASE_ADDR + (PAGE_SIZE_BYTES * 2))
+
+uint8_t gr_ram[PAGE_SIZE_BYTES * 2] = {0};
 uint32_t active_display_page = 0;
 std::queue<uint8_t> key_buffer;
 
-const uint32_t base_colors[10] = {
-    0xFFFFFFFF, 0xFF000000, 0xFFFF0000, 0xFF00FF00, 0xFF0000FF,
-    0xFFFFFF00, 0xFF00FFFF, 0xFFFF00FF, 0xFFFF8000, 0xFFFFC0CB};
-
-uint32_t decode_digital_color(uint16_t val) {
-  if (val & 0x8000) {
-    uint8_t r = (val >> 10) & 0x1F;
-    uint8_t g = (val >> 5) & 0x1F;
-    uint8_t b = val & 0x1F;
-    return 0xFF000000 | ((r << 3) | (r >> 2)) << 16 |
-           ((g << 3) | (g >> 2)) << 8 | ((b << 3) | (b >> 2));
-  }
-  if (val < 10)
-    return base_colors[val];
-  if (val >= 32 && val <= 63) {
-    uint8_t gray = (val - 32) * 255 / 31;
-    return 0xFF000000 | (gray << 16) | (gray << 8) | gray;
-  }
-  if (val >= 64 && val <= 127) {
-    uint8_t r = ((val >> 4) & 0x03) * 85;
-    uint8_t g = ((val >> 2) & 0x03) * 85;
-    uint8_t b = (val & 0x03) * 85;
-    return 0xFF000000 | (r << 16) | (g << 8) | b;
-  }
-  return 0xFF000000;
-}
-
-// Color Lookup Table to avoid recalculating colors per pixel per frame
+// Framebuffer pixel staging array moved to static memory
+static uint32_t render_pixels[FB_WIDTH * FB_HEIGHT];
 static uint32_t color_lut[65536];
 
-// Gate host-side checks behind a bitmask to avoid per-cycle syscall overhead
-static constexpr vluint64_t HOST_CHECK_INTERVAL = 8192; // Must be power of 2
-static constexpr vluint64_t HOST_CHECK_MASK = HOST_CHECK_INTERVAL - 1;
+// Decode Standard 16-bit RGB565 to 32-bit ARGB8888
+inline uint32_t decode_rgb565(uint16_t val) {
+	uint8_t r = (val >> 11) & 0x1F;
+	uint8_t g = (val >> 5)  & 0x3F;
+	uint8_t b =  val        & 0x1F;
 
-// Legacy timestamp function required by Verilator when linking with -flto
-double sc_time_stamp() { return 0; }
+	uint8_t r8 = (r << 3) | (r >> 2);
+	uint8_t g8 = (g << 2) | (g >> 4);
+	uint8_t b8 = (b << 3) | (b >> 2);
 
-int main(int argc, char **argv) {
-  VerilatedContext *contextp = new VerilatedContext;
-  contextp->commandArgs(argc, argv);
-  contextp->randReset(0);
+	return 0xFF000000 | (r8 << 16) | (g8 << 8) | b8;
+}
 
-  Vmain_cpu *top = new Vmain_cpu{contextp};
+vluint64_t main_time = 0;
 
-  if (SDL_Init(SDL_INIT_VIDEO) < 0)
-    return 1;
+double sc_time_stamp() {
+	return main_time;
+}
 
-  // Detect native host display refresh rate
-  SDL_DisplayMode display_mode;
-  int target_fps = 60; // Default fallback
-  if (SDL_GetCurrentDisplayMode(0, &display_mode) == 0 &&
-      display_mode.refresh_rate > 0) {
-    target_fps = display_mode.refresh_rate;
-  }
-  std::cout << "[SYSTEM] Detected Host Display Refresh Rate: " << target_fps
-            << " Hz" << std::endl;
+int main(int argc, char** argv) {
+	Verilated::commandArgs(argc, argv);
+	auto top = std::make_unique<Vmain_cpu>();
 
-  // Scale window 3x (960x600 window size)
-  SDL_Window *window = SDL_CreateWindow(
-      "Visual Wozmon Display (320x200)", SDL_WINDOWPOS_CENTERED,
-      SDL_WINDOWPOS_CENTERED, FB_WIDTH * 3, FB_HEIGHT * 3, SDL_WINDOW_SHOWN);
+	if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+		std::cerr << "SDL Initialization Error: " << SDL_GetError() << std::endl;
+		return 1;
+	}
 
-  SDL_Renderer *renderer =
-      SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-  SDL_Texture *texture =
-      SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
-                        SDL_TEXTUREACCESS_STREAMING, FB_WIDTH, FB_HEIGHT);
+	SDL_Window* window = SDL_CreateWindow("RV32I CPU Simulator (16-Bit RGB565 Color)",
+										  SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+										  FB_WIDTH * 3, FB_HEIGHT * 3, SDL_WINDOW_SHOWN);
+	SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+	SDL_Texture* texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
+											 SDL_TEXTUREACCESS_STREAMING, FB_WIDTH, FB_HEIGHT);
 
-  SDL_StartTextInput();
+	SDL_StartTextInput();
 
-  // Populate the color LUT once at startup
-  for (uint32_t i = 0; i < 65536; ++i) {
-    color_lut[i] = decode_digital_color(static_cast<uint16_t>(i));
-  }
+	for (uint32_t i = 0; i < 65536; ++i) {
+		color_lut[i] = decode_rgb565(static_cast<uint16_t>(i));
+	}
 
-  top->CLK = 0;
-  top->eval();
+	top->CLK = 0;
+	top->eval();
 
-  bool running = true;
-  vluint64_t main_time = 0;
+	uint32_t stats_last_time = SDL_GetTicks();
+	uint32_t render_last_time = SDL_GetTicks();
+	uint32_t cycles_this_second = 0;
+	uint32_t frames_this_second = 0;
 
-  // High-precision sub-millisecond frame pacing counters
-  const uint64_t perf_freq = SDL_GetPerformanceFrequency();
-  uint64_t last_frame_counter = SDL_GetPerformanceCounter();
-  const double frame_delay_seconds = 1.0 / static_cast<double>(target_fps);
+	while (!Verilated::gotFinish()) {
+		// --- 1. Clock High Transition ---
+		top->CLK = 1;
+		top->eval();
+		main_time++;
+		cycles_this_second++;
 
-  // --- Statistics Counters ---
-  uint32_t stats_last_time = SDL_GetTicks();
-  vluint64_t cycles_this_second = 0;
-  uint32_t frames_this_second = 0;
+		// --- 2. Clean Hardware Byte-Lane Write Handling ---
+		uint8_t we_mask = top->WeIO & 0x0F;
+		if (we_mask != 0) [[unlikely]] {
+			uint32_t addr  = top->AddIO;
+			uint32_t wdata = top->DwIO;
 
-  while (!contextp->gotFinish() && running) {
+			if (addr >= VRAM_BASE_ADDR && addr < VRAM_END_ADDR) {
+				const uint32_t offset = (addr & ~3u) - VRAM_BASE_ADDR;
+				switch (we_mask) {
+				case 0x1: gr_ram[offset]     = static_cast<uint8_t>(wdata);       break;
+				case 0x2: gr_ram[offset + 1] = static_cast<uint8_t>(wdata >> 8);  break;
+				case 0x4: gr_ram[offset + 2] = static_cast<uint8_t>(wdata >> 16); break;
+				case 0x8: gr_ram[offset + 3] = static_cast<uint8_t>(wdata >> 24); break;
+				case 0x3:
+					gr_ram[offset]     = static_cast<uint8_t>(wdata);
+					gr_ram[offset + 1] = static_cast<uint8_t>(wdata >> 8);
+					break;
+				case 0x6:
+					gr_ram[offset + 1] = static_cast<uint8_t>(wdata >> 8);
+					gr_ram[offset + 2] = static_cast<uint8_t>(wdata >> 16);
+					break;
+				case 0xC:
+					gr_ram[offset + 2] = static_cast<uint8_t>(wdata >> 16);
+					gr_ram[offset + 3] = static_cast<uint8_t>(wdata >> 24);
+					break;
+				case 0xF:
+					gr_ram[offset]     = static_cast<uint8_t>(wdata);
+					gr_ram[offset + 1] = static_cast<uint8_t>(wdata >> 8);
+					gr_ram[offset + 2] = static_cast<uint8_t>(wdata >> 16);
+					gr_ram[offset + 3] = static_cast<uint8_t>(wdata >> 24);
+					break;
+				default:
+					for (unsigned lane = 0; lane < 4; ++lane)
+						if (we_mask & (1u << lane))
+							gr_ram[offset + lane] = static_cast<uint8_t>(wdata >> (8u * lane));
+				}
+			}
+			else if ((addr & ~3u) == 0x00080000) {
+				if (we_mask & 0x01) {
+					active_display_page = wdata & 0x01;
+				}
+			}
+		}
 
-    // ----------------------------------------------------
-    // 1. CLOCK LOW PHASE (Combinational setup)
-    // ----------------------------------------------------
-    top->CLK = 0;
-    top->eval();
+		// --- 3. Handle Keyboard MMIO Reads ---
+		if (top->ReIO) [[unlikely]] {
+			uint32_t addr = top->AddIO;
+			if ((addr & ~3u) == 0x00080020) {
+				if (!key_buffer.empty()) {
+					top->DrIO = key_buffer.front();
+					key_buffer.pop();
+				} else {
+					top->DrIO = 0;
+				}
+			} else if ((addr & ~3u) == 0x00080024) {
+				top->DrIO = key_buffer.empty() ? 0 : 1;
+			} else {
+				top->DrIO = 0;
+			}
+		}
 
-    uint32_t addr = top->AddIO;
-    bool re = top->ReIO;
-    bool we = top->WeIO;
-    uint32_t wdata = top->DwIO;
+		// --- 4. Clock Low Transition ---
+		top->CLK = 0;
+		top->eval();
 
-    bool pop_pending = false;
+		// --- 5. Poll Events every 8192 cycles (& 0x1FFF), Render at 60 FPS (~16ms) ---
+		if ((main_time & 0x1FFFF) == 0) [[unlikely]] {
+			SDL_Event event;
+			while (SDL_PollEvent(&event)) {
+				if (event.type == SDL_QUIT) {
+					goto cleanup;
+				} else if (event.type == SDL_TEXTINPUT) {
+					for (int i = 0; event.text.text[i] != '\0'; i++) {
+						key_buffer.push(static_cast<uint8_t>(event.text.text[i]));
+					}
+				} else if (event.type == SDL_KEYDOWN) {
+					if (event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_KP_ENTER) {
+						key_buffer.push('\r');
+					} else if (event.key.keysym.sym == SDLK_ESCAPE) {
+						key_buffer.push(27);
+					} else if (event.key.keysym.sym == SDLK_BACKSPACE) {
+						key_buffer.push('\b');
+					}
+				}
+			}
 
-    // ----------------------------------------------------
-    // 2. APPLY ASYNCHRONOUS READS (8 KB MMIO at 0x00080000)
-    // ----------------------------------------------------
-    if (re) {
-      if (addr >= 0x00080020 && addr <= 0x00080023) {
-        top->DrIO =
-            key_buffer.empty() ? 0 : static_cast<uint32_t>(key_buffer.front());
-        pop_pending = true;
-      } else if (addr >= 0x00080024 && addr <= 0x00080027) {
-        top->DrIO = key_buffer.empty() ? 0 : 1;
-      } else {
-        top->DrIO = 0;
-      }
-      top->eval();
-    }
+			uint32_t now = SDL_GetTicks();
+			if (now - render_last_time >= 16) {
+				render_last_time = now;
 
-    // ----------------------------------------------------
-    // 3. CLOCK RISING EDGE (Latch state & Pop)
-    // ----------------------------------------------------
-    top->CLK = 1;
-    top->eval();
+				uint32_t page_byte_offset = active_display_page * PAGE_SIZE_BYTES;
+				const uint16_t* vram_16 = reinterpret_cast<const uint16_t*>(&gr_ram[page_byte_offset]);
 
-    if (pop_pending && !key_buffer.empty()) {
-      key_buffer.pop();
-    }
+				for (int i = 0; i < FB_WIDTH * FB_HEIGHT; i++) {
+					render_pixels[i] = color_lut[vram_16[i]];
+				}
 
-    if (we) {
-      // MMIO Controls (0x00080000 - 0x00081FFF)
-      if (addr >= 0x00080000 && addr <= 0x00080003) {
-        active_display_page = wdata & 0x1;
-      } else if (addr >= 0x00080004 && addr <= 0x00080007) {
-        std::putchar(static_cast<char>(wdata & 0xFF));
-        std::fflush(stdout);
-      }
-      // Graphics RAM starting after 8 KB MMIO block (0x00082000)
-      else if (addr >= 0x00082000 &&
-               addr < (0x00082000 + (PAGE_SIZE_WORDS * 2 * 4))) {
-        uint32_t word_idx = (addr - 0x00082000) >> 2;
-        gr_ram[word_idx] = wdata;
-      }
-    }
+				SDL_UpdateTexture(texture, NULL, render_pixels, FB_WIDTH * sizeof(uint32_t));
+				SDL_RenderClear(renderer);
+				SDL_RenderCopy(renderer, texture, NULL, NULL);
+				SDL_RenderPresent(renderer);
 
-    // ----------------------------------------------------
-    // 4. HOST-SIDE WORK: Gated to bounded wall-clock checks
-    // ----------------------------------------------------
-    if ((main_time & HOST_CHECK_MASK) == 0) {
-      uint64_t current_counter = SDL_GetPerformanceCounter();
-      double elapsed_seconds =
-          static_cast<double>(current_counter - last_frame_counter) /
-          static_cast<double>(perf_freq);
+				frames_this_second++;
+			}
 
-      // ---- Native Hz render & OS event pump ----
-      if (elapsed_seconds >= frame_delay_seconds) {
-        last_frame_counter = current_counter;
+			// Statistics do not need a host timer call on every simulated cycle.
+			const uint32_t elapsed_ms = now - stats_last_time;
+			if (elapsed_ms >= 1000) [[unlikely]] {
+				const double mhz = static_cast<double>(cycles_this_second) /
+				                   (static_cast<double>(elapsed_ms) * 1000.0);
+				const double fps = static_cast<double>(frames_this_second) * 1000.0 /
+				                   static_cast<double>(elapsed_ms);
+				std::cout << "\r[CPU METRICS] Speed: " << mhz
+				          << " MHz | Refresh: " << fps
+				          << " FPS | Total Cycles: " << main_time << std::flush;
+				stats_last_time = now;
+				cycles_this_second = 0;
+				frames_this_second = 0;
+			}
+		}
 
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-          if (event.type == SDL_QUIT) {
-            running = false;
-          } else if (event.type == SDL_TEXTINPUT) {
-            uint8_t c = static_cast<uint8_t>(event.text.text[0]);
-            if (c != '\r' && c != '\n') {
-              key_buffer.push(c);
-            }
-          } else if (event.type == SDL_KEYDOWN) {
-            if (event.key.keysym.sym == SDLK_RETURN ||
-                event.key.keysym.sym == SDLK_KP_ENTER) {
-              key_buffer.push(0x0D);
-            } else if (event.key.keysym.sym == SDLK_BACKSPACE) {
-              key_buffer.push('\b');
-            } else if (event.key.keysym.sym == SDLK_ESCAPE) {
-              key_buffer.push(27);
-            }
-          }
-        }
+	}
 
-        uint32_t pixels[FB_WIDTH * FB_HEIGHT];
-        uint32_t page_word_offset = active_display_page * PAGE_SIZE_WORDS;
+cleanup:
+	SDL_StopTextInput();
+	SDL_DestroyTexture(texture);
+	SDL_DestroyRenderer(renderer);
+	SDL_DestroyWindow(window);
+	SDL_Quit();
 
-        for (int i = 0; i < FB_WIDTH * FB_HEIGHT; i++) {
-          pixels[i] = color_lut[gr_ram[page_word_offset + i] & 0xFFFF];
-        }
-
-        SDL_UpdateTexture(texture, NULL, pixels, FB_WIDTH * sizeof(uint32_t));
-        SDL_RenderClear(renderer);
-        SDL_RenderCopy(renderer, texture, NULL, NULL);
-        SDL_RenderPresent(renderer);
-
-        frames_this_second++;
-      }
-
-      // ---- Performance metrics reporting ----
-      uint32_t current_time = SDL_GetTicks();
-      uint32_t elapsed_ms = current_time - stats_last_time;
-      if (elapsed_ms >= 1000) {
-        double mhz = (double)cycles_this_second / (elapsed_ms * 1000.0);
-        double fps = (double)frames_this_second * 1000.0 / elapsed_ms;
-
-        std::cout << "\r[CPU METRICS] Speed: " << mhz
-                  << " MHz | Refresh: " << fps
-                  << " FPS | Total Cycles: " << main_time << std::flush;
-
-        stats_last_time = current_time;
-        cycles_this_second = 0;
-        frames_this_second = 0;
-      }
-    }
-
-    cycles_this_second++;
-    main_time++;
-  }
-
-  std::cout << std::endl;
-  SDL_StopTextInput();
-  SDL_DestroyTexture(texture);
-  SDL_DestroyRenderer(renderer);
-  SDL_DestroyWindow(window);
-  SDL_Quit();
-  delete top;
-  delete contextp;
-  return 0;
+	return 0;
 }

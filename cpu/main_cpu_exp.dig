@@ -277,6 +277,10 @@
           <string>Label</string>
           <string>WeIO</string>
         </entry>
+        <entry>
+          <string>Bits</string>
+          <int>4</int>
+        </entry>
       </elementAttributes>
       <pos x="1860" y="720"/>
     </visualElement>

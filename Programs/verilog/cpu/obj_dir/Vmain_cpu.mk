@@ -37,11 +37,11 @@ VM_PREFIX = Vmain_cpu
 VM_MODPREFIX = Vmain_cpu
 # User CFLAGS (from -CFLAGS on Verilator command line)
 VM_USER_CFLAGS = \
-  -I/opt/homebrew/include/SDL2 -D_THREAD_SAFE -O3 -flto -fomit-frame-pointer -fno-stack-protector -DNDEBUG \
+  -I/opt/homebrew/include/SDL2 -D_THREAD_SAFE -O3 -mcpu=native -flto -fomit-frame-pointer -fno-stack-protector -DNDEBUG \
 
 # User LDLIBS (from -LDFLAGS on Verilator command line)
 VM_USER_LDLIBS = \
-  -L/opt/homebrew/lib -lSDL2main -lSDL2 -Wl,-framework,Cocoa -O3 -flto -fomit-frame-pointer -fno-stack-protector -DNDEBUG \
+  -L/opt/homebrew/lib -lSDL2main -lSDL2 -Wl,-framework,Cocoa -O3 -mcpu=native -flto -fomit-frame-pointer -fno-stack-protector -DNDEBUG \
 
 # User .cpp files (from .cpp's on Verilator command line)
 VM_USER_CLASSES = \

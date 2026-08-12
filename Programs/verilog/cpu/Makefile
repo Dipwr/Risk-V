@@ -17,8 +17,8 @@ VFLAGS := -Wno-fatal -Wno-DECLFILENAME -O3 \
           --output-split-cfuncs 500
 
 # --- Host C++ Compiler & Linker Optimizations ---
-# Note: -march=native removed for Apple Clang ARM64 compatibility
-CXXOPT := -O3 -flto -fomit-frame-pointer -fno-stack-protector -DNDEBUG
+# Use -mcpu=native for Apple Silicon / Host CPU pipeline tuning
+CXXOPT := -O3 -mcpu=native -flto -fomit-frame-pointer -fno-stack-protector -DNDEBUG
 
 .PHONY: all run lint verify clean
 

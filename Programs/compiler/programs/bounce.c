@@ -1,104 +1,163 @@
+/* ============================================================================
+ * RV32I BARE-METAL BOUNCING BOX / DVD LOGO SIMULATION (RGB565 UPDATED)
+ * Target: Custom RV32I Core (320x200 @ Double-Buffered 16-bit VRAM)
+ * ============================================================================
+ */
+
 #include <stdint.h>
 
-// Mapped as 32-bit words per pixel!
-#define GRAPHIC_RAM ((volatile uint32_t *)0x00080000)
-#define PAGE_REG ((volatile uint32_t *)0x000A0000)
-#define KEY_STAT ((volatile uint32_t *)0x000A0024)
+/* --- Hardware MMIO Registers --- */
+#define PAGE_REG	((volatile uint32_t *)0x00080000)
+#define TERM_OUT	((volatile uint32_t *)0x00080004)
+#define KEY_DATA	((volatile uint32_t *)0x00080020)
+#define KEY_STAT	((volatile uint32_t *)0x00080024)
 
-#define SCREEN_WIDTH 160
-#define SCREEN_HEIGHT 100
-#define BUFFER_SIZE (SCREEN_WIDTH * SCREEN_HEIGHT) // 16,000 32-bit words
-#define SQUARE_SIZE 5
+/* 16-bit Packed VRAM Pointer (1 pixel per 2 bytes) */
+#define GRAPHIC_RAM	((volatile uint16_t *)0x00082000)
 
-// 32-bit word color values
-#define COLOR_WHITE 0x0000FFFF
-#define COLOR_BLACK 0x00008000
+/* --- Display & Viewport Setup --- */
+#define SCREEN_WIDTH	320
+#define SCREEN_HEIGHT	200
+#define PAGE_PIXELS	(SCREEN_WIDTH * SCREEN_HEIGHT) // 64,000 pixels per page
 
-// Draw/erase 8x8 region in 32-bit Graphic RAM
-void draw_square_page(int page, int x, int y, uint32_t color) {
-  // Offset in 32-bit words
-  int page_offset = page * BUFFER_SIZE;
+#define BOX_WIDTH	32
+#define BOX_HEIGHT	20
 
-  for (int row = 0; row < SQUARE_SIZE; row++) {
-    int current_y = y + row;
-    if (current_y < 0 || current_y >= SCREEN_HEIGHT)
-      continue;
+/* --- Color Palette (RGB565 format: 5-bit Red, 6-bit Green, 5-bit Blue) --- */
+#define MAKE_RGB(r, g, b) \
+	((uint16_t)((((r) & 0x1F) << 11) | (((g) & 0x3F) << 5) | ((b) & 0x1F)))
 
-    int row_offset = page_offset + (current_y * SCREEN_WIDTH);
+#define COLOR_BLACK	((uint16_t)0x0000)
+#define COLOR_RED	MAKE_RGB(31, 0, 0)
+#define COLOR_GREEN	MAKE_RGB(0, 63, 0)
+#define COLOR_BLUE	MAKE_RGB(0, 0, 31)
+#define COLOR_YELLOW	MAKE_RGB(31, 63, 0)
+#define COLOR_CYAN	MAKE_RGB(0, 63, 31)
+#define COLOR_MAGENTA	MAKE_RGB(31, 0, 31)
+#define COLOR_WHITE	MAKE_RGB(31, 63, 31)
 
-    for (int col = 0; col < SQUARE_SIZE; col++) {
-      int current_x = x + col;
-      if (current_x < 0 || current_x >= SCREEN_WIDTH)
-        continue;
+static const uint16_t color_palette[7] = {
+	COLOR_RED, COLOR_GREEN, COLOR_BLUE,
+	COLOR_YELLOW, COLOR_CYAN, COLOR_MAGENTA, COLOR_WHITE
+};
 
-      GRAPHIC_RAM[row_offset + current_x] = color;
-    }
-  }
+/* --- Software Math Helpers (RV32I -nostdlib) --- */
+int __mulsi3(int a, int b) {
+	int res = 0;
+	int neg = (a < 0) ^ (b < 0);
+	unsigned int ua = (a < 0) ? -a : a;
+	unsigned int ub = (b < 0) ? -b : b;
+	while (ub > 0) {
+		if (ub & 1) res += ua;
+		ua <<= 1;
+		ub >>= 1;
+	}
+	return neg ? -res : res;
 }
 
-// Clear a 32-bit buffer page
-void clear_buffer_page(int page, uint32_t color) {
-  int page_offset = page * BUFFER_SIZE;
-  for (int i = 0; i < BUFFER_SIZE; i++) {
-    GRAPHIC_RAM[page_offset + i] = color;
-  }
+int __divsi3(int a, int b) {
+	if (b == 0) return 0;
+	int neg = (a < 0) ^ (b < 0);
+	unsigned int num = (a < 0) ? -a : a;
+	unsigned int den = (b < 0) ? -b : b;
+	unsigned int quot = 0, rem = 0;
+	for (int i = 31; i >= 0; i--) {
+		rem = (rem << 1) | ((num >> i) & 1);
+		if (rem >= den) {
+			rem -= den;
+			quot |= (1U << i);
+		}
+	}
+	return neg ? -(int)quot : (int)quot;
 }
 
+int __modsi3(int a, int b) {
+	if (b == 0) return 0;
+	int q = __divsi3(a, b);
+	return a - __mulsi3(q, b);
+}
+
+/* --- Terminal Output Helper --- */
+void print_string(const char *str) {
+	while (*str) {
+		*TERM_OUT = (uint32_t)(*str++);
+	}
+}
+
+/* --- Graphics Rendering Routines --- */
+void clear_page(int page, uint16_t color) {
+	uint32_t offset = page * PAGE_PIXELS;
+	for (int i = 0; i < PAGE_PIXELS; i++) {
+		GRAPHIC_RAM[offset + i] = color;
+	}
+}
+
+void draw_rect(int page, int x, int y, int w, int h, uint16_t color) {
+	uint32_t page_offset = page * PAGE_PIXELS;
+
+	for (int dy = 0; dy < h; dy++) {
+		int py = y + dy;
+		if (py < 0 || py >= SCREEN_HEIGHT) continue;
+
+		uint32_t row = page_offset + (py * SCREEN_WIDTH);
+		for (int dx = 0; dx < w; dx++) {
+			int px = x + dx;
+			if (px >= 0 && px < SCREEN_WIDTH) {
+				GRAPHIC_RAM[row + px] = color;
+			}
+		}
+	}
+}
+
+/* --- Main Program --- */
 int main(void) {
-  int x = 10, y = 10;
-  int dx = 1, dy = 1;
+	print_string("[RV32I Core] Bouncing Box Simulation (16-bit RGB565)\n");
 
-  // Keep separate history for each 32-bit buffer
-  int old_x[2] = {10, 10};
-  int old_y[2] = {10, 10};
+	clear_page(0, COLOR_BLACK);
+	clear_page(1, COLOR_BLACK);
 
-  uint32_t active_page = 0;
+	int x = 10, y = 10;
+	int dx = 2, dy = 1;
+	int color_idx = 0;
+	uint32_t active_page = 0;
 
-  // 1. Clear both 32-bit framebuffers
-  clear_buffer_page(0, COLOR_WHITE);
-  clear_buffer_page(1, COLOR_WHITE);
-  *PAGE_REG = 0;
+	while (1) {
+		if (*KEY_STAT != 0) {
+			uint32_t key = *KEY_DATA;
+			(void)key;
+			print_string("[Exiting to Wozmon...]\n");
+			break;
+		}
 
-  while (1) {
-    // Exit if key pressed
-    if (*KEY_STAT & 0x1) {
-      break;
-    }
+		uint32_t back_page = 1 - active_page;
 
-    // 2. Select back buffer
-    uint32_t back_page = active_page ^ 1;
+		clear_page(back_page, COLOR_BLACK);
 
-    // 3. Erase previous square on back buffer
-    draw_square_page(back_page, old_x[back_page], old_y[back_page],
-                     COLOR_WHITE);
+		x += dx;
+		y += dy;
 
-    // 4. Draw new square position on back buffer
-    draw_square_page(back_page, x, y, COLOR_BLACK);
+		int bounced = 0;
+		if (x <= 0 || (x + BOX_WIDTH) >= SCREEN_WIDTH) {
+			dx = -dx;
+			bounced = 1;
+		}
+		if (y <= 0 || (y + BOX_HEIGHT) >= SCREEN_HEIGHT) {
+			dy = -dy;
+			bounced = 1;
+		}
 
-    // Store history for this buffer
-    old_x[back_page] = x;
-    old_y[back_page] = y;
+		if (bounced) {
+			color_idx = (color_idx + 1) % 7;
+		}
 
-    // 5. Physics update
-    x += dx;
-    y += dy;
+		draw_rect(back_page, x, y, BOX_WIDTH, BOX_HEIGHT, color_palette[color_idx]);
 
-    if (x <= 0 || x >= (SCREEN_WIDTH - SQUARE_SIZE)) {
-      dx = -dx;
-      x += dx;
-    }
-    if (y <= 0 || y >= (SCREEN_HEIGHT - SQUARE_SIZE)) {
-      dy = -dy;
-      y += dy;
-    }
+		*PAGE_REG = back_page;
+		active_page = back_page;
 
-    // 6. Flip page
-    active_page = back_page;
-    *PAGE_REG = active_page;
-  }
+		for (volatile int delay = 0; delay < 20000; delay++);
+	}
 
-  // Reset screen back to Buffer 0
-  *PAGE_REG = 0;
-  clear_buffer_page(0, COLOR_WHITE);
-  return 0;
+	*PAGE_REG = 0;
+	return 0;
 }
