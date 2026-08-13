@@ -21,8 +21,6 @@ VM_TRACE_FST = 0
 VM_TRACE_SAIF = 0
 # Tracing output mode in VCD format?  0/1 (from --trace-vcd)
 VM_TRACE_VCD = 0
-# VPI enabled?  0/1 (from --vpi)
-VM_VPI = 0
 
 ### Object file lists...
 # Generated module classes, fast-path, compile with highest optimization
