@@ -373,19 +373,27 @@
         </entry>
         <entry>
           <string>Description</string>
-          <string>0000:add
-0001:sub
-0010:and
-0011:or
-0100:xor
-0101:comUnsigned
-0110:comSigned
-0111:SLL
-1000:SRL
-1001:SRA</string>
+          <string>00000:add
+00001:sub
+00010:and
+00011:or
+00100:xor
+00101:comUnsigned
+00110:comSigned
+00111:SLL
+01000:SRL
+01001:SRA
+01010: MUL
+01011: MULH
+01100: MULHU
+01101: MULHSU
+01110: DIV
+01111: DIVU
+10000: REM
+10001: REMU</string>
         </entry>
       </elementAttributes>
-      <pos x="1080" y="920"/>
+      <pos x="1080" y="820"/>
     </visualElement>
     <visualElement>
       <elementName>Multiplexer</elementName>
