@@ -87,7 +87,9 @@ const char* Vmain_cpu::name() const {
 void Vmain_cpu___024root___eval_final(Vmain_cpu___024root* vlSelf);
 
 VL_ATTR_COLD void Vmain_cpu::final() {
+    contextp()->executingFinal(true);
     Vmain_cpu___024root___eval_final(&(vlSymsp->TOP));
+    contextp()->executingFinal(false);
 }
 
 //============================================================
