@@ -31,13 +31,13 @@ echo "Using python: ${PYTHON_BIN}"
 mkdir -p out
 
 # 1. Compile C source to object file in out/
-${PREFIX}gcc -c -march=rv32i -mabi=ilp32 -O2 -ffreestanding main.c -o out/main.o
+${PREFIX}gcc -c -march=rv32im -mabi=ilp32 -O2 -ffreestanding main.c -o out/main.o
 
 # 2. Assemble boot wrapper into out/
-${PREFIX}as -march=rv32i -mabi=ilp32 boot.s -o out/boot.o
+${PREFIX}as -march=rv32im -mabi=ilp32 boot.s -o out/boot.o
 
 # 3. Link objects using root linker.ld into out/program.elf
-${PREFIX}gcc -T ./linker.ld -nostdlib -Wl,-m,elf32lriscv out/boot.o out/main.o -o out/program.elf
+${PREFIX}gcc -march=rv32im -mabi=ilp32 -T ./linker.ld -nostdlib -Wl,-m,elf32lriscv out/boot.o out/main.o -o out/program.elf
 
 # 4. Extract raw binary payload into out/
 ${PREFIX}objcopy -O binary out/program.elf out/program.bin

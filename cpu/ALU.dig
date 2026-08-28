@@ -626,6 +626,30 @@
       <elementAttributes/>
       <pos x="880" y="1080"/>
     </visualElement>
+    <visualElement>
+      <elementName>Out</elementName>
+      <elementAttributes>
+        <entry>
+          <string>small</string>
+          <boolean>true</boolean>
+        </entry>
+        <entry>
+          <string>Label</string>
+          <string>stall</string>
+        </entry>
+      </elementAttributes>
+      <pos x="1260" y="1140"/>
+    </visualElement>
+    <visualElement>
+      <elementName>Const</elementName>
+      <elementAttributes>
+        <entry>
+          <string>Value</string>
+          <long>0</long>
+        </entry>
+      </elementAttributes>
+      <pos x="1240" y="1140"/>
+    </visualElement>
   </visualElements>
   <wires>
     <wire>
@@ -1283,6 +1307,10 @@
     <wire>
       <p1 x="580" y="1140"/>
       <p2 x="880" y="1140"/>
+    </wire>
+    <wire>
+      <p1 x="1240" y="1140"/>
+      <p2 x="1260" y="1140"/>
     </wire>
     <wire>
       <p1 x="1640" y="-120"/>

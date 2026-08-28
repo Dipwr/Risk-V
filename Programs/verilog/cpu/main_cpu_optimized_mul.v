@@ -397,9 +397,7 @@ module RAM_256KB (
 	(* ram_style = "block" *) reg [7:0] mem2 [0:65535];
 	(* ram_style = "block" *) reg [7:0] mem3 [0:65535];
 
-	// CRITICAL FIX: Clocking on the falling edge gives the single-cycle CPU 
-	// half a clock cycle to fetch data before the registers latch on the posedge.
-	always @(negedge Clock) begin
+	always @(posedge Clock) begin
 		// Port 1: Read & Write Data
 		if (We) begin
 			if (ByteSelect[0]) mem0[AddressIn] <= Din[7:0];

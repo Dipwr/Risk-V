@@ -9,6 +9,7 @@
 #define GRAPHIC_RAM	((volatile uint16_t *)0x00082000)
 #define PAGE_REG	((volatile uint32_t *)0x00080000)
 #define KEY_STAT	((volatile uint32_t *)0x00080024)
+#define KEY_DATA    ((volatile uint32_t *)0x00080020)
 
 #define SCREEN_WIDTH	320
 #define SCREEN_HEIGHT	200
@@ -25,70 +26,6 @@ struct Vec2 {
 };
 
 #include "model_data.h"
-
-int __mulsi3(int a, int b) {
-	int neg = (a < 0) ^ (b < 0);
-	unsigned int ua = (unsigned int)(a < 0 ? -a : a);
-	unsigned int ub = (unsigned int)(b < 0 ? -b : b);
-	unsigned int res = 0;
-	while (ub > 0) {
-		if (ub & 1)
-			res += ua;
-		ua <<= 1;
-		ub >>= 1;
-	}
-	return neg ? -(int)res : (int)res;
-}
-
-int __divsi3(int a, int b) {
-	int neg = 0;
-	unsigned int num = (unsigned int)a;
-	unsigned int den = (unsigned int)b;
-
-	if (a < 0) {
-		num = (unsigned int)-a;
-		neg ^= 1;
-	}
-	if (b < 0) {
-		den = (unsigned int)-b;
-		neg ^= 1;
-	}
-	if (den == 0)
-		return 0;
-
-	unsigned int t = num;
-	int hi = 0;
-	if (t & 0xFFFF0000u) {
-		hi += 16;
-		t >>= 16;
-	}
-	if (t & 0x0000FF00u) {
-		hi += 8;
-		t >>= 8;
-	}
-	if (t & 0x000000F0u) {
-		hi += 4;
-		t >>= 4;
-	}
-	if (t & 0x0000000Cu) {
-		hi += 2;
-		t >>= 2;
-	}
-	if (t & 0x00000002u) {
-		hi += 1;
-	}
-
-	unsigned int quot = 0, rem = 0;
-	for (int i = hi; i >= 0; i--) {
-		rem <<= 1;
-		rem |= (num >> i) & 1;
-		if (rem >= den) {
-			rem -= den;
-			quot |= (1U << i);
-		}
-	}
-	return neg ? -(int)quot : (int)quot;
-}
 
 int iabs(int v) { return (v < 0) ? -v : v; }
 
@@ -161,6 +98,11 @@ int main(void) {
 
 	uint8_t angle_x = 127;
 	uint8_t angle_y = 0;
+
+	while (*KEY_STAT & 0x1) {
+		volatile uint32_t dummy = *KEY_DATA;
+		(void)dummy; 
+	}
 
 	while (1) {
 		if (*KEY_STAT & 0x1)
