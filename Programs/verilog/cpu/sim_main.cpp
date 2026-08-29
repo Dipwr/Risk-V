@@ -31,6 +31,9 @@
 #define VRAM_BASE_ADDR  0x00082000
 #define VRAM_END_ADDR   (VRAM_BASE_ADDR + (PAGE_SIZE_BYTES * 2))
 
+// Execute 131,072 CPU cycles before pausing to check host UI/Events
+constexpr uint32_t CYCLES_PER_BATCH = 131072; 
+
 uint8_t gr_ram[PAGE_SIZE_BYTES * 2] = {0};
 uint32_t active_display_page = 0;
 std::queue<uint8_t> key_buffer;
@@ -242,222 +245,216 @@ int main(int argc, char** argv) {
 	double last_fps = 0.0;
 
 	while (!Verilated::gotFinish()) {
-		// --- 1. Clock High Transition ---
-		top->CLK = 1;
-		top->eval();
-		main_time++;
-		cycles_this_second++;
+        
+        // --- CORE EVALUATION LOOP (Micro-batched for speed) ---
+        for (uint32_t tick = 0; tick < CYCLES_PER_BATCH; ++tick) {
+            
+            // --- 1. Clock High Transition ---
+            top->CLK = 1;
+            top->eval();
 
-		// --- 2. Clean Hardware Byte-Lane Write Handling ---
-		uint8_t we_mask = top->WeIO & 0x0F;
-		if (we_mask != 0) [[unlikely]] {
-			uint32_t addr  = top->AddIO;
-			uint32_t wdata = top->DwIO;
+            // --- 2. Clean Hardware Byte-Lane Write Handling ---
+            uint8_t we_mask = top->WeIO & 0x0F;
+            if (we_mask != 0) [[unlikely]] {
+                uint32_t addr  = top->AddIO;
+                uint32_t vram_offset = addr - VRAM_BASE_ADDR; 
+                
+                // Single subtraction bounds check (underflow protects base bounds)
+                if (vram_offset < (PAGE_SIZE_BYTES * 2)) {
+                    uint32_t offset = vram_offset & ~3u;
+                    uint32_t wdata = top->DwIO;
+                    
+                    if (we_mask == 0xF) {
+                        std::memcpy(&gr_ram[offset], &wdata, 4);
+                    } else if (we_mask == 0x3) {
+                        std::memcpy(&gr_ram[offset], &wdata, 2);
+                    } else if (we_mask == 0xC) {
+                        uint16_t wdata_upper = static_cast<uint16_t>(wdata >> 16);
+                        std::memcpy(&gr_ram[offset + 2], &wdata_upper, 2);
+                    } else {
+                        // Fallback for fragmented byte masks
+                        if (we_mask & 0x1) gr_ram[offset]     = static_cast<uint8_t>(wdata);
+                        if (we_mask & 0x2) gr_ram[offset + 1] = static_cast<uint8_t>(wdata >> 8);
+                        if (we_mask & 0x4) gr_ram[offset + 2] = static_cast<uint8_t>(wdata >> 16);
+                        if (we_mask & 0x8) gr_ram[offset + 3] = static_cast<uint8_t>(wdata >> 24);
+                    }
+                }
+                else if ((addr & ~3u) == 0x00080000) {
+                    if (we_mask & 0x01) {
+                        active_display_page = top->DwIO & 0x01;
+                    }
+                }
+            }
 
-			if (addr >= VRAM_BASE_ADDR && addr < VRAM_END_ADDR) {
-				const uint32_t offset = (addr & ~3u) - VRAM_BASE_ADDR;
-				switch (we_mask) {
-				case 0x1: gr_ram[offset]     = static_cast<uint8_t>(wdata);       break;
-				case 0x2: gr_ram[offset + 1] = static_cast<uint8_t>(wdata >> 8);  break;
-				case 0x4: gr_ram[offset + 2] = static_cast<uint8_t>(wdata >> 16); break;
-				case 0x8: gr_ram[offset + 3] = static_cast<uint8_t>(wdata >> 24); break;
-				case 0x3:
-					gr_ram[offset]     = static_cast<uint8_t>(wdata);
-					gr_ram[offset + 1] = static_cast<uint8_t>(wdata >> 8);
-					break;
-				case 0x6:
-					gr_ram[offset + 1] = static_cast<uint8_t>(wdata >> 8);
-					gr_ram[offset + 2] = static_cast<uint8_t>(wdata >> 16);
-					break;
-				case 0xC:
-					gr_ram[offset + 2] = static_cast<uint8_t>(wdata >> 16);
-					gr_ram[offset + 3] = static_cast<uint8_t>(wdata >> 24);
-					break;
-				case 0xF:
-					gr_ram[offset]     = static_cast<uint8_t>(wdata);
-					gr_ram[offset + 1] = static_cast<uint8_t>(wdata >> 8);
-					gr_ram[offset + 2] = static_cast<uint8_t>(wdata >> 16);
-					gr_ram[offset + 3] = static_cast<uint8_t>(wdata >> 24);
-					break;
-				default:
-					for (unsigned lane = 0; lane < 4; ++lane)
-						if (we_mask & (1u << lane))
-							gr_ram[offset + lane] = static_cast<uint8_t>(wdata >> (8u * lane));
-				}
-			}
-			else if ((addr & ~3u) == 0x00080000) {
-				if (we_mask & 0x01) {
-					active_display_page = wdata & 0x01;
-				}
-			}
-		}
+            // --- 3. Handle Keyboard MMIO Reads ---
+            if (top->ReIO) [[unlikely]] {
+                uint32_t addr = top->AddIO & ~3u;
+                if (addr == 0x00080020) {
+                    if (!key_buffer.empty()) {
+                        top->DrIO = key_buffer.front();
+                        key_buffer.pop();
+                    } else {
+                        top->DrIO = 0;
+                    }
+                } else if (addr == 0x00080024) {
+                    top->DrIO = key_buffer.empty() ? 0 : 1;
+                } else {
+                    top->DrIO = 0;
+                }
+            }
 
-		// --- 3. Handle Keyboard MMIO Reads ---
-		if (top->ReIO) [[unlikely]] {
-			uint32_t addr = top->AddIO;
-			if ((addr & ~3u) == 0x00080020) {
-				if (!key_buffer.empty()) {
-					top->DrIO = key_buffer.front();
-					key_buffer.pop();
-				} else {
-					top->DrIO = 0;
-				}
-			} else if ((addr & ~3u) == 0x00080024) {
-				top->DrIO = key_buffer.empty() ? 0 : 1;
-			} else {
-				top->DrIO = 0;
-			}
-		}
+            // --- 4. Clock Low Transition ---
+            top->CLK = 0;
+            top->eval();
+        }
 
-		// --- 4. Clock Low Transition ---
-		top->CLK = 0;
-		top->eval();
+        // Advance global metrics for the batch
+        main_time += CYCLES_PER_BATCH;
+        cycles_this_second += CYCLES_PER_BATCH;
 
-		// --- 5. Poll Events every 8192 cycles (& 0x1FFF), Render at 60 FPS (~16ms) ---
-		if ((main_time & 0x1FFFF) == 0) [[unlikely]] {
-			SDL_Event event;
-			while (SDL_PollEvent(&event)) {
-				if (event.type == SDL_QUIT) {
-					goto cleanup;
-				} 
-				// Mouse Button Clicks for Control Panel Buttons
-				else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
-					int mx = event.button.x;
-					int my = event.button.y;
+		// --- 5. Poll Events & Display Render ---
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_QUIT) {
+                goto cleanup;
+            } 
+            // Mouse Button Clicks for Control Panel Buttons
+            else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
+                int mx = event.button.x;
+                int my = event.button.y;
 
-					// RESET CPU Button Clicked
-					if (mx >= btn_reset.x && mx <= (btn_reset.x + btn_reset.w) &&
-						my >= btn_reset.y && my <= (btn_reset.y + btn_reset.h)) {
-						
-						// Clear keyboard queue and reset time trackers BEFORE creating new model
-						while (!key_buffer.empty()) key_buffer.pop();
-						main_time = 0;
-						active_display_page = 0;
-						std::memset(gr_ram, 0, sizeof(gr_ram));
+                // RESET CPU Button Clicked
+                if (mx >= btn_reset.x && mx <= (btn_reset.x + btn_reset.w) &&
+                    my >= btn_reset.y && my <= (btn_reset.y + btn_reset.h)) {
+                    
+                    // Clear keyboard queue and reset time trackers BEFORE creating new model
+                    while (!key_buffer.empty()) key_buffer.pop();
+                    main_time = 0;
+                    active_display_page = 0;
+                    std::memset(gr_ram, 0, sizeof(gr_ram));
 
-						// Destroy top model FIRST, then recreate context at time = 0
-						top.reset();
-						contextp = std::make_unique<VerilatedContext>();
-						contextp->commandArgs(argc, argv);
-						contextp->time(0);
-						
-						// Instantiate new model with fresh context
-						top = std::make_unique<Vmain_cpu>(contextp.get());
+                    // Destroy top model FIRST, then recreate context at time = 0
+                    top.reset();
+                    contextp = std::make_unique<VerilatedContext>();
+                    contextp->commandArgs(argc, argv);
+                    contextp->time(0);
+                    
+                    // Instantiate new model with fresh context
+                    top = std::make_unique<Vmain_cpu>(contextp.get());
 
-						top->CLK = 0;
-						top->eval();
+                    top->CLK = 0;
+                    top->eval();
 
-						std::cout << "\n[SIM GUI] Hardware CPU state, PC, and context reset." << std::endl;
-					}
-					// MODE Toggle Button Clicked
-					else if (mx >= btn_mode.x && mx <= (btn_mode.x + btn_mode.w) &&
-							 my >= btn_mode.y && my <= (btn_mode.y + btn_mode.h)) {
-						paste_mode = !paste_mode;
-					}
-					// PASTE NOW Button Clicked
-					else if (mx >= btn_paste.x && mx <= (btn_paste.x + btn_paste.w) &&
-							 my >= btn_paste.y && my <= (btn_paste.y + btn_paste.h)) {
-						paste_clipboard();
-					}
-				}
-				// Keyboard input processing (Passed directly to CPU)
-				else if (event.type == SDL_TEXTINPUT) {
-					for (int i = 0; event.text.text[i] != '\0'; i++) {
-						key_buffer.push(static_cast<uint8_t>(event.text.text[i]));
-					}
-				} else if (event.type == SDL_KEYDOWN) {
-					Uint16 mod = event.key.keysym.mod;
-					SDL_Keycode sym = event.key.keysym.sym;
+                    std::cout << "\n[SIM GUI] Hardware CPU state, PC, and context reset." << std::endl;
+                }
+                // MODE Toggle Button Clicked
+                else if (mx >= btn_mode.x && mx <= (btn_mode.x + btn_mode.w) &&
+                            my >= btn_mode.y && my <= (btn_mode.y + btn_mode.h)) {
+                    paste_mode = !paste_mode;
+                }
+                // PASTE NOW Button Clicked
+                else if (mx >= btn_paste.x && mx <= (btn_paste.x + btn_paste.w) &&
+                            my >= btn_paste.y && my <= (btn_paste.y + btn_paste.h)) {
+                    paste_clipboard();
+                }
+            }
+            // Keyboard input processing (Passed directly to CPU)
+            else if (event.type == SDL_TEXTINPUT) {
+                for (int i = 0; event.text.text[i] != '\0'; i++) {
+                    key_buffer.push(static_cast<uint8_t>(event.text.text[i]));
+                }
+            } else if (event.type == SDL_KEYDOWN) {
+                Uint16 mod = event.key.keysym.mod;
+                SDL_Keycode sym = event.key.keysym.sym;
 
-					// In PASTE MODE, Ctrl+V triggers internal clipboard paste
-					if (paste_mode && sym == SDLK_v && (mod & (KMOD_CTRL | KMOD_GUI))) {
-						paste_clipboard();
-					}
-					// Otherwise, keypresses pass directly to CPU
-					else if (sym == SDLK_RETURN || sym == SDLK_KP_ENTER) {
-						key_buffer.push('\r');
-					} else if (sym == SDLK_ESCAPE) {
-						key_buffer.push(27);
-					} else if (sym == SDLK_BACKSPACE) {
-						key_buffer.push('\b');
-					}
-				}
-			}
+                // In PASTE MODE, Ctrl+V triggers internal clipboard paste
+                if (paste_mode && sym == SDLK_v && (mod & (KMOD_CTRL | KMOD_GUI))) {
+                    paste_clipboard();
+                }
+                // Otherwise, keypresses pass directly to CPU
+                else if (sym == SDLK_RETURN || sym == SDLK_KP_ENTER) {
+                    key_buffer.push('\r');
+                } else if (sym == SDLK_ESCAPE) {
+                    key_buffer.push(27);
+                } else if (sym == SDLK_BACKSPACE) {
+                    key_buffer.push('\b');
+                }
+            }
+        }
 
-			uint32_t now = SDL_GetTicks();
-			if (now - render_last_time >= 16) {
-				render_last_time = now;
+        uint32_t now = SDL_GetTicks();
+        if (now - render_last_time >= 16) {
+            render_last_time = now;
 
-				// 1. Render CPU Framebuffer
-				uint32_t page_byte_offset = active_display_page * PAGE_SIZE_BYTES;
-				const uint16_t* vram_16 = reinterpret_cast<const uint16_t*>(&gr_ram[page_byte_offset]);
+            // 1. Render CPU Framebuffer
+            uint32_t page_byte_offset = active_display_page * PAGE_SIZE_BYTES;
+            const uint16_t* vram_16 = reinterpret_cast<const uint16_t*>(&gr_ram[page_byte_offset]);
 
-				for (int i = 0; i < FB_WIDTH * FB_HEIGHT; i++) {
-					render_pixels[i] = color_lut[vram_16[i]];
-				}
+            for (int i = 0; i < FB_WIDTH * FB_HEIGHT; i++) {
+                render_pixels[i] = color_lut[vram_16[i]];
+            }
 
-				SDL_UpdateTexture(texture, NULL, render_pixels, FB_WIDTH * sizeof(uint32_t));
-				
-				SDL_Rect display_rect = {0, 0, SCREEN_WIDTH, SCREEN_HEIGHT};
-				SDL_RenderClear(renderer);
-				SDL_RenderCopy(renderer, texture, NULL, &display_rect);
+            SDL_UpdateTexture(texture, NULL, render_pixels, FB_WIDTH * sizeof(uint32_t));
+            
+            SDL_Rect display_rect = {0, 0, SCREEN_WIDTH, SCREEN_HEIGHT};
+            SDL_RenderClear(renderer);
+            SDL_RenderCopy(renderer, texture, NULL, &display_rect);
 
-				// 2. Render Dedicated Control Panel (Y = 600..670)
-				SDL_Rect panel_rect = {0, SCREEN_HEIGHT, SCREEN_WIDTH, PANEL_HEIGHT};
-				SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255); // Dark Gray Background
-				SDL_RenderFillRect(renderer, &panel_rect);
+            // 2. Render Dedicated Control Panel (Y = 600..670)
+            SDL_Rect panel_rect = {0, SCREEN_HEIGHT, SCREEN_WIDTH, PANEL_HEIGHT};
+            SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255); // Dark Gray Background
+            SDL_RenderFillRect(renderer, &panel_rect);
 
-				SDL_SetRenderDrawColor(renderer, 60, 60, 60, 255); // Top Border Line
-				SDL_RenderDrawLine(renderer, 0, SCREEN_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT);
+            SDL_SetRenderDrawColor(renderer, 60, 60, 60, 255); // Top Border Line
+            SDL_RenderDrawLine(renderer, 0, SCREEN_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT);
 
-				// Button 1: RESET CPU
-				SDL_SetRenderDrawColor(renderer, 160, 40, 40, 255); // Red
-				SDL_RenderFillRect(renderer, &btn_reset);
-				render_text(renderer, "RESET CPU", btn_reset.x + 11, btn_reset.y + 16, {255, 255, 255, 255});
+            // Button 1: RESET CPU
+            SDL_SetRenderDrawColor(renderer, 160, 40, 40, 255); // Red
+            SDL_RenderFillRect(renderer, &btn_reset);
+            render_text(renderer, "RESET CPU", btn_reset.x + 11, btn_reset.y + 16, {255, 255, 255, 255});
 
-				// Button 2: MODE TOGGLE
-				if (paste_mode) {
-					SDL_SetRenderDrawColor(renderer, 180, 110, 20, 255); // Amber (Paste Mode)
-					SDL_RenderFillRect(renderer, &btn_mode);
-					render_text(renderer, "MODE: PASTE (Ctrl+V)", btn_mode.x + 35, btn_mode.y + 16, {255, 255, 255, 255});
-				} else {
-					SDL_SetRenderDrawColor(renderer, 30, 90, 150, 255); // Blue (Normal Mode)
-					SDL_RenderFillRect(renderer, &btn_mode);
-					render_text(renderer, "MODE: NORMAL (Direct)", btn_mode.x + 31, btn_mode.y + 16, {255, 255, 255, 255});
-				}
+            // Button 2: MODE TOGGLE
+            if (paste_mode) {
+                SDL_SetRenderDrawColor(renderer, 180, 110, 20, 255); // Amber (Paste Mode)
+                SDL_RenderFillRect(renderer, &btn_mode);
+                render_text(renderer, "MODE: PASTE (Ctrl+V)", btn_mode.x + 35, btn_mode.y + 16, {255, 255, 255, 255});
+            } else {
+                SDL_SetRenderDrawColor(renderer, 30, 90, 150, 255); // Blue (Normal Mode)
+                SDL_RenderFillRect(renderer, &btn_mode);
+                render_text(renderer, "MODE: NORMAL (Direct)", btn_mode.x + 31, btn_mode.y + 16, {255, 255, 255, 255});
+            }
 
-				// Button 3: PASTE NOW
-				SDL_SetRenderDrawColor(renderer, 40, 140, 60, 255); // Green
-				SDL_RenderFillRect(renderer, &btn_paste);
-				render_text(renderer, "PASTE NOW", btn_paste.x + 11, btn_paste.y + 16, {255, 255, 255, 255});
+            // Button 3: PASTE NOW
+            SDL_SetRenderDrawColor(renderer, 40, 140, 60, 255); // Green
+            SDL_RenderFillRect(renderer, &btn_paste);
+            render_text(renderer, "PASTE NOW", btn_paste.x + 11, btn_paste.y + 16, {255, 255, 255, 255});
 
-				// 3. Render CPU Metrics & Status
-				char buf_mhz[32], buf_fps[32], buf_cycles[48], buf_queue[32];
-				snprintf(buf_mhz, sizeof(buf_mhz), "Speed:  %.2f MHz", last_mhz);
-				snprintf(buf_fps, sizeof(buf_fps), "FPS:    %.1f", last_fps);
-				snprintf(buf_cycles, sizeof(buf_cycles), "Cycles: %llu", (unsigned long long)main_time);
-				snprintf(buf_queue, sizeof(buf_queue), "Buffer: %zu keys", key_buffer.size());
+            // 3. Render CPU Metrics & Status
+            char buf_mhz[32], buf_fps[32], buf_cycles[48], buf_queue[32];
+            snprintf(buf_mhz, sizeof(buf_mhz), "Speed:  %.2f MHz", last_mhz);
+            snprintf(buf_fps, sizeof(buf_fps), "FPS:    %.1f", last_fps);
+            snprintf(buf_cycles, sizeof(buf_cycles), "Cycles: %llu", (unsigned long long)main_time);
+            snprintf(buf_queue, sizeof(buf_queue), "Buffer: %zu keys", key_buffer.size());
 
-				render_text(renderer, buf_mhz, 470, SCREEN_HEIGHT + 15, {220, 220, 220, 255});
-				render_text(renderer, buf_fps, 470, SCREEN_HEIGHT + 40, {220, 220, 220, 255});
-				render_text(renderer, buf_cycles, 700, SCREEN_HEIGHT + 15, {180, 220, 255, 255});
-				render_text(renderer, buf_queue, 700, SCREEN_HEIGHT + 40, {255, 220, 180, 255});
+            render_text(renderer, buf_mhz, 470, SCREEN_HEIGHT + 15, {220, 220, 220, 255});
+            render_text(renderer, buf_fps, 470, SCREEN_HEIGHT + 40, {220, 220, 220, 255});
+            render_text(renderer, buf_cycles, 700, SCREEN_HEIGHT + 15, {180, 220, 255, 255});
+            render_text(renderer, buf_queue, 700, SCREEN_HEIGHT + 40, {255, 220, 180, 255});
 
-				SDL_RenderPresent(renderer);
+            SDL_RenderPresent(renderer);
 
-				frames_this_second++;
-			}
+            frames_this_second++;
+        }
 
-			// Update CPU metrics once per second
-			const uint32_t elapsed_ms = now - stats_last_time;
-			if (elapsed_ms >= 1000) [[unlikely]] {
-				last_mhz = static_cast<double>(cycles_this_second) / (static_cast<double>(elapsed_ms) * 1000.0);
-				last_fps = static_cast<double>(frames_this_second) * 1000.0 / static_cast<double>(elapsed_ms);
-				stats_last_time = now;
-				cycles_this_second = 0;
-				frames_this_second = 0;
-			}
-		}
+        // Update CPU metrics once per second
+        const uint32_t elapsed_ms = now - stats_last_time;
+        if (elapsed_ms >= 1000) [[unlikely]] {
+            last_mhz = static_cast<double>(cycles_this_second) / (static_cast<double>(elapsed_ms) * 1000.0);
+            last_fps = static_cast<double>(frames_this_second) * 1000.0 / static_cast<double>(elapsed_ms);
+            stats_last_time = now;
+            cycles_this_second = 0;
+            frames_this_second = 0;
+        }
 
 	}
 

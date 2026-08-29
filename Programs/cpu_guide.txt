@@ -30,10 +30,8 @@
  * DEVELOPER NOTE ON SOFTWARE MATH HELPERS:
  * This guide serves as a template reference. Because programs compile with
  * `-nostdlib`, there is no automatic runtime library linked.
- * * The math functions included below (__mulsi3, __divsi3, __modsi3, __muldi3, __divdi3)
- * are template implementations. Copy and paste ONLY the specific helpers your 
- * program actually uses into your source code. If your project doesn't perform 64-bit 
- * math, you do not need to include __muldi3 or __divdi3.
+ * The functions included below are template implementations.
+ * Copy and paste ONLY the specific helpers your program actually uses into your source code.
  * ============================================================================ */
 
 #include <stdint.h>
@@ -58,74 +56,6 @@
 #define COLOR_BLUE   ((uint16_t)0x001F)
 
 // ----------------------------------------------------------------------------
-// MATH HELPER TEMPLATES
-// ----------------------------------------------------------------------------
-
-int __mulsi3(int a, int b) {
-	int res = 0;
-	int neg = (a < 0) ^ (b < 0);
-	unsigned int ua = (a < 0) ? -a : a;
-	unsigned int ub = (b < 0) ? -b : b;
-	while (ub > 0) {
-		if (ub & 1) res += ua;
-		ua <<= 1;
-		ub >>= 1;
-	}
-	return neg ? -res : res;
-}
-
-int __divsi3(int a, int b) {
-	if (b == 0) return 0;
-	int neg = (a < 0) ^ (b < 0);
-	unsigned int num = (a < 0) ? -a : a;
-	unsigned int den = (b < 0) ? -b : b;
-	unsigned int quot = 0, rem = 0;
-	for (int i = 31; i >= 0; i--) {
-		rem = (rem << 1) | ((num >> i) & 1);
-		if (rem >= den) {
-			rem -= den;
-			quot |= (1U << i);
-		}
-	}
-	return neg ? -(int)quot : (int)quot;
-}
-
-int __modsi3(int a, int b) {
-	if (b == 0) return 0;
-	int q = __divsi3(a, b);
-	return a - __mulsi3(q, b);
-}
-
-int64_t __muldi3(int64_t a, int64_t b) {
-	int neg = (a < 0) ^ (b < 0);
-	uint64_t ua = (a < 0) ? -a : a;
-	uint64_t ub = (b < 0) ? -b : b;
-	uint64_t res = 0;
-	while (ub > 0) {
-		if (ub & 1) res += ua;
-		ua <<= 1;
-		ub >>= 1;
-	}
-	return neg ? -(int64_t)res : (int64_t)res;
-}
-
-int64_t __divdi3(int64_t a, int64_t b) {
-	if (b == 0) return 0;
-	int neg = (a < 0) ^ (b < 0);
-	uint64_t num = (a < 0) ? -a : a;
-	uint64_t den = (b < 0) ? -b : b;
-	uint64_t quot = 0, rem = 0;
-	for (int i = 63; i >= 0; i--) {
-		rem = (rem << 1) | ((num >> i) & 1);
-		if (rem >= den) {
-			rem -= den;
-			quot |= (1ULL << i);
-		}
-	}
-	return neg ? -(int64_t)quot : (int64_t)quot;
-}
-
-// ----------------------------------------------------------------------------
 // FRAMEBUFFER GRAPHICS DRAWING HELPERS
 // ----------------------------------------------------------------------------
 static inline void put_pixel(int page, int x, int y, uint16_t color) {
@@ -139,12 +69,6 @@ void clear_screen(int page, uint16_t color) {
 	uint32_t offset = page * PAGE_PIXELS;
 	for (int i = 0; i < PAGE_PIXELS; i++) {
 		GRAPHIC_RAM[offset + i] = color;
-	}
-}
-
-void print_string(const char *str) {
-	while (*str) {
-		*TERM_OUT = (uint32_t)(*str++);
 	}
 }
 
