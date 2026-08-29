@@ -8,7 +8,7 @@
  * SYSTEM MEMORY MAP:
  * Region           | Base Address | End Address | Size   | Access | Description
  * -----------------|--------------|-------------|--------|--------|------------------------------
- * Boot ROM         | 0x00000000   | 0x0003FFFF  | 256 KB | R      | Wozmon & Font Bitmaps
+ * Boot ROM         | 0x00000000   | 0x0003FFFF  | 256 KB | R      | Wozmon
  * Unified RAM      | 0x00040000   | 0x0007FFFF  | 256 KB | R/W    | Program Executable & Stack
  * Standard MMIO    | 0x00080000   | 0x00081FFF  | 8 KB   | R/W    | Hardware Registers
  * Graphics Page 0  | 0x00082000   | 0x000A13FF  | 128 KB | R/W    | Front Framebuffer (320x200, 16-bit RGB565)

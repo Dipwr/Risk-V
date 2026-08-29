@@ -29,9 +29,9 @@ class alignas(VL_CACHE_LINE_BYTES) Vmain_cpu VL_NOT_FINAL : public VerilatedMode
     // The application code writes and reads these signals to
     // propagate new values into/out from the Verilated model.
     VL_IN8(&CLK,0,0);
+    VL_OUT8(&CLKIO,0,0);
     VL_OUT8(&WeIO,3,0);
     VL_OUT8(&ReIO,0,0);
-    VL_OUT8(&CLKIO,0,0);
     VL_IN(&DrIO,31,0);
     VL_OUT(&AddIO,31,0);
     VL_OUT(&DwIO,31,0);

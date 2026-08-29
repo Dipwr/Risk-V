@@ -10,9 +10,9 @@ Vmain_cpu::Vmain_cpu(VerilatedContext* _vcontextp__, const char* _vcname__)
     : VerilatedModel{*_vcontextp__}
     , vlSymsp{new Vmain_cpu__Syms(contextp(), _vcname__, this)}
     , CLK{vlSymsp->TOP.CLK}
+    , CLKIO{vlSymsp->TOP.CLKIO}
     , WeIO{vlSymsp->TOP.WeIO}
     , ReIO{vlSymsp->TOP.ReIO}
-    , CLKIO{vlSymsp->TOP.CLKIO}
     , DrIO{vlSymsp->TOP.DrIO}
     , AddIO{vlSymsp->TOP.AddIO}
     , DwIO{vlSymsp->TOP.DwIO}
