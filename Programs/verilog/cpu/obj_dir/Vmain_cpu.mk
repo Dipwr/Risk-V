@@ -12,7 +12,7 @@ PERL = perl
 # Python3 executable (from $PYTHON3, defaults to 'python3' if not set)
 PYTHON3 = python3
 # Path to Verilator kit (from $VERILATOR_ROOT)
-VERILATOR_ROOT = /opt/homebrew/Cellar/verilator/5.050/share/verilator
+VERILATOR_ROOT = /usr/share/verilator
 # SystemC include directory with systemc.h (from $SYSTEMC_INCLUDE)
 SYSTEMC_INCLUDE ?=
 # SystemC library directory with libsystemc.a (from $SYSTEMC_LIBDIR)
@@ -37,11 +37,11 @@ VM_PREFIX = Vmain_cpu
 VM_MODPREFIX = Vmain_cpu
 # User CFLAGS (from -CFLAGS on Verilator command line)
 VM_USER_CFLAGS = \
-  -I/opt/homebrew/include/SDL2 -D_THREAD_SAFE -O3 -mcpu=native -flto -fomit-frame-pointer -fno-stack-protector -DNDEBUG \
+  -I/usr/include/SDL2 -D_GNU_SOURCE=1 -D_REENTRANT -O3 -march=native -flto -fomit-frame-pointer -fno-stack-protector -DNDEBUG -fprofile-use=/home/dpa/Documents/code/Digital_Logic/Digital/Risk-V/Programs/verilog/cpu/pgo_data -fprofile-correction -Wno-error=missing-profile \
 
 # User LDLIBS (from -LDFLAGS on Verilator command line)
 VM_USER_LDLIBS = \
-  -L/opt/homebrew/lib -lSDL2main -lSDL2 -Wl,-framework,Cocoa -O3 -mcpu=native -flto -fomit-frame-pointer -fno-stack-protector -DNDEBUG \
+  -lSDL2 -O3 -march=native -flto -fomit-frame-pointer -fno-stack-protector -DNDEBUG -fprofile-use=/home/dpa/Documents/code/Digital_Logic/Digital/Risk-V/Programs/verilog/cpu/pgo_data -fprofile-correction -Wno-error=missing-profile \
 
 # User .cpp files (from .cpp's on Verilator command line)
 VM_USER_CLASSES = \

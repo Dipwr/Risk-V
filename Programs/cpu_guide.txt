@@ -1,63 +1,105 @@
 /* ============================================================================
- * RV32I BARE-METAL SYSTEM REFERENCE & STARTER TEMPLATE
- * Target: Custom RV32I Processor Core (Simulated in Verilator + SDL2)
- * Load Address: 0x00040000 (Unified RAM via Wozmon)
+ * IMPORTANT DISCLAIMER: THIS FILE IS NOT A LIBRARY OR INCLUDED HEADER!
+ * ----------------------------------------------------------------------------
+ * DO NOT `#include` this file in your C programs!
+ * This guide is strictly a reference manual and code template.
+ * Because bare-metal programs compile with `-nostdlib`, none of these functions
+ * exist automatically in a runtime library.
+ *
+ * IF YOU WANT TO USE A FUNCTION FROM THIS GUIDE:
+ * Copy and paste ONLY the specific helper functions, macros, or MMIO definitions
+ * you need directly into your own program's source file (.c or .h).
+ * ============================================================================
+ *
+ * RV32IM BARE-METAL CPU REFERENCE GUIDE & STARTER TEMPLATE
+ * Target: Custom RV32IM Processor Core (Simulated in Verilator + SDL2)
+ * Load Address: 0x00040000 (Unified RAM)
  * Stack Pointer: 0x0007FFF0
  * ============================================================================
  *
  * SYSTEM MEMORY MAP:
  * Region           | Base Address | End Address | Size   | Access | Description
  * -----------------|--------------|-------------|--------|--------|------------------------------
- * Boot ROM         | 0x00000000   | 0x0003FFFF  | 256 KB | R      | Wozmon
+ * Boot ROM         | 0x00000000   | 0x0003FFFF  | 256 KB | R      | Wozmon Bootloader
  * Unified RAM      | 0x00040000   | 0x0007FFFF  | 256 KB | R/W    | Program Executable & Stack
- * Standard MMIO    | 0x00080000   | 0x00081FFF  | 8 KB   | R/W    | Hardware Registers
- * Graphics Page 0  | 0x00082000   | 0x000A13FF  | 128 KB | R/W    | Front Framebuffer (320x200, 16-bit RGB565)
- * Graphics Page 1  | 0x000A1400   | 0x000C07FF  | 128 KB | R/W    | Back Framebuffer (320x200, 16-bit RGB565)
+ * Standard MMIO    | 0x00080000   | 0x00081FFF  | 8 KB   | R/W    | Hardware Control Registers
+ * Graphics Page 0  | 0x00082000   | 0x000A13FF  | 128 KB | R/W    | Front Framebuffer (320x200 RGB565)
+ * Graphics Page 1  | 0x000A1400   | 0x000C07FF  | 128 KB | R/W    | Back Framebuffer (320x200 RGB565)
  *
- * MMIO REGISTERS:
- * PAGE_REG (0x00080000): Write 0 for Page 0, 1 for Page 1 display presentation.
- * TERM_OUT (0x00080004): Write ASCII character byte to output to terminal.
- * KEY_DATA (0x00080020): Read ASCII byte from keyboard buffer FIFO.
- * KEY_STAT (0x00080024): Read status (1 = Key Available, 0 = Buffer Empty).
- * GRAPHIC_RAM (0x00082000): Start of 16-bit packed VRAM array.
+ * MMIO HARDWARE REGISTERS:
+ * - PAGE_REG (0x00080000): Write 0 to display Page 0; write 1 to display Page 1.
+ * - TERM_OUT (0x00080004): Write ASCII character byte to output to terminal.
+ * - KEY_DATA (0x00080020): Read ASCII byte from keyboard buffer FIFO.
+ * - KEY_STAT (0x00080024): Read status bit (Bit 0 = 1: Key Available, 0: Buffer Empty).
+ * - GRAPHIC_RAM (0x00082000): Start of 16-bit packed RGB565 VRAM array.
  *
- * COLOR FORMAT (RGB565):
- * GRAPHIC_RAM uses standard 16-bit RGB565 color format (5 bits Red, 6 bits Green, 5 bits Blue).
+ * COLOR FORMAT (RGB565 - 16 Bit Packed):
  * - Red:   Bits [15:11] (0 to 31)
  * - Green: Bits [10:5]  (0 to 63)
  * - Blue:  Bits [4:0]   (0 to 31)
- *
- * DEVELOPER NOTE ON SOFTWARE MATH HELPERS:
- * This guide serves as a template reference. Because programs compile with
- * `-nostdlib`, there is no automatic runtime library linked.
- * The functions included below are template implementations.
- * Copy and paste ONLY the specific helpers your program actually uses into your source code.
  * ============================================================================ */
 
 #include <stdint.h>
 
+// Hardware MMIO Base Register Definitions
 #define PAGE_REG     ((volatile uint32_t *)0x00080000)
 #define TERM_OUT     ((volatile uint32_t *)0x00080004)
 #define KEY_DATA     ((volatile uint32_t *)0x00080020)
 #define KEY_STAT     ((volatile uint32_t *)0x00080024)
 #define GRAPHIC_RAM  ((volatile uint16_t *)0x00082000)
 
+// Display & Page Dimensions
 #define SCREEN_WIDTH  320
 #define SCREEN_HEIGHT 200
 #define PAGE_PIXELS   (SCREEN_WIDTH * SCREEN_HEIGHT) // 64,000 pixels per page
 
-// RGB565 Macro: r (0..31), g (0..63), b (0..31)
+// RGB565 Color Generation Macro (r: 0..31, g: 0..63, b: 0..31)
 #define MAKE_RGB(r, g, b) ((uint16_t)((((r) & 0x1F) << 11) | (((g) & 0x3F) << 5) | ((b) & 0x1F)))
 
-#define COLOR_BLACK  ((uint16_t)0x0000)
-#define COLOR_WHITE  ((uint16_t)0xFFFF)
-#define COLOR_RED    ((uint16_t)0xF800)
-#define COLOR_GREEN  ((uint16_t)0x07E0)
-#define COLOR_BLUE   ((uint16_t)0x001F)
+// Pre-calculated Hardware Palette
+#define COLOR_BLACK   ((uint16_t)0x0000)
+#define COLOR_WHITE   ((uint16_t)0xFFFF)
+#define COLOR_RED     ((uint16_t)0xF800)
+#define COLOR_GREEN   ((uint16_t)0x07E0)
+#define COLOR_BLUE    ((uint16_t)0x001F)
+#define COLOR_YELLOW  ((uint16_t)0xFFE0)
+#define COLOR_CYAN    ((uint16_t)0x07FF)
+#define COLOR_MAGENTA ((uint16_t)0xF81F)
 
 // ----------------------------------------------------------------------------
-// FRAMEBUFFER GRAPHICS DRAWING HELPERS
+// HARDWARE I/O & UTILITY FUNCTIONS
 // ----------------------------------------------------------------------------
+
+// Absolute Value Helper
+static inline int iabs(int v) {
+	return (v < 0) ? -v : v;
+}
+
+// Terminal String Printing via MMIO
+void print_string(const char *str) {
+	while (*str) {
+		*TERM_OUT = (uint32_t)(*str++);
+	}
+}
+
+// Check keyboard status (non-blocking)
+static inline int is_key_available(void) {
+	return (*KEY_STAT & 0x1);
+}
+
+// Read single key from FIFO buffer
+static inline char read_keyboard(void) {
+	if (is_key_available()) {
+		return (char)(*KEY_DATA);
+	}
+	return 0;
+}
+
+// ----------------------------------------------------------------------------
+// FRAMEBUFFER & GRAPHICS HELPERS
+// ----------------------------------------------------------------------------
+
+// Set a single pixel on a specific page (0 or 1)
 static inline void put_pixel(int page, int x, int y, uint16_t color) {
 	if (x >= 0 && x < SCREEN_WIDTH && y >= 0 && y < SCREEN_HEIGHT) {
 		uint32_t offset = (page * PAGE_PIXELS) + (y * SCREEN_WIDTH) + x;
@@ -65,16 +107,46 @@ static inline void put_pixel(int page, int x, int y, uint16_t color) {
 	}
 }
 
-void clear_screen(int page, uint16_t color) {
-	uint32_t offset = page * PAGE_PIXELS;
+// Clear an entire framebuffer page (0 or 1) to a single color
+void clear_page(int page, uint16_t color) {
+	uint32_t page_offset = page * PAGE_PIXELS;
 	for (int i = 0; i < PAGE_PIXELS; i++) {
-		GRAPHIC_RAM[offset + i] = color;
+		GRAPHIC_RAM[page_offset + i] = color;
 	}
 }
 
+// Integer-only Bresenham Line Drawing Algorithm
+void draw_line(int page, int x0, int y0, int x1, int y1, uint16_t color) {
+	int dx = iabs(x1 - x0);
+	int sx = (x0 < x1) ? 1 : -1;
+	int dy = -iabs(y1 - y0);
+	int sy = (y0 < y1) ? 1 : -1;
+	int err = dx + dy;
+	int e2;
+	uint32_t page_offset = page * PAGE_PIXELS;
+
+	while (1) {
+		if (x0 >= 0 && x0 < SCREEN_WIDTH && y0 >= 0 && y0 < SCREEN_HEIGHT) {
+			GRAPHIC_RAM[page_offset + (y0 * SCREEN_WIDTH) + x0] = color;
+		}
+		if (x0 == x1 && y0 == y1) break;
+
+		e2 = 2 * err;
+		if (e2 >= dy) {
+			err += dy;
+			x0 += sx;
+		}
+		if (e2 <= dx) {
+			err += dx;
+			y0 += sy;
+		}
+	}
+}
+
+// Wait for keypress and jump to Wozmon ROM at 0x00000000
 void return_to_wozmon_on_key(void) {
-	print_string("\nPress any key to return to Wozmon...");
-	while ((*KEY_STAT & 1) == 0);
+	print_string("\nExecution finished. Press any key to return to Wozmon...");
+	while (!is_key_available());
 	(void)*KEY_DATA;
 	
 	*PAGE_REG = 0;
@@ -83,24 +155,34 @@ void return_to_wozmon_on_key(void) {
 }
 
 // ----------------------------------------------------------------------------
-// SKELETON ENTRY POINT
+// APPLICATION STARTER TEMPLATE
 // ----------------------------------------------------------------------------
 int main(void) {
 	uint32_t active_page = 0;
-	print_string("[RV32I Core] Program execution started in RAM.\n");
+	print_string("[RV32IM Core] Program started.\n");
 
-	clear_screen(0, COLOR_BLACK);
-	clear_screen(1, COLOR_BLACK);
+	// Initialize both buffer pages to black
+	clear_page(0, COLOR_BLACK);
+	clear_page(1, COLOR_BLACK);
+	*PAGE_REG = 0;
 
 	while (1) {
+		// Calculate target off-screen back buffer
 		uint32_t back_page = active_page ^ 1;
 
-		// Render application graphics into back_page here...
+		// 1. Clear back buffer
+		clear_page(back_page, COLOR_BLACK);
 
+		// 2. Render graphics into back_page
+		draw_line(back_page, 10, 10, 310, 190, COLOR_GREEN);
+		put_pixel(back_page, 160, 100, COLOR_WHITE);
+
+		// 3. Flip display hardware page register
 		*PAGE_REG = back_page;
 		active_page = back_page;
 
-		if (*KEY_STAT & 1) {
+		// Exit loop if key is pressed
+		if (is_key_available()) {
 			break;
 		}
 	}

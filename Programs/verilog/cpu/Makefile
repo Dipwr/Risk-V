@@ -15,17 +15,20 @@ endif
 SDL_CFLAGS := $(shell sdl2-config --cflags)
 SDL_LIBS   := $(shell sdl2-config --libs)
 
-# --- Verilator Optimizations ---
-VFLAGS := -Wno-fatal -Wno-DECLFILENAME -O3 \
+# --- Verilator Optimizations & Warning Suppression ---
+VFLAGS := -Wno-fatal -Wno-DECLFILENAME -Wno-PINMISSING -Wno-WIDTHTRUNC -Wno-UNOPTFLAT -O3 \
           --x-assign fast --x-initial fast --noassert \
           --inline-mult 1000 \
           --output-split 20000 \
           --output-split-cfuncs 500
 
-# --- Host C++ Compiler & Linker Optimizations ---
-CXXOPT := -O3 $(ARCH_OPT) -flto -fomit-frame-pointer -fno-stack-protector -DNDEBUG
+# --- PGO Variable Injection ---
+PGO_FLAGS ?=
 
-.PHONY: all run lint verify clean
+# --- Host C++ Compiler & Linker Optimizations ---
+CXXOPT := -O3 $(ARCH_OPT) -flto -fomit-frame-pointer -fno-stack-protector -DNDEBUG $(PGO_FLAGS)
+
+.PHONY: all run lint verify clean pgo-gen pgo-use
 
 all: obj_dir/$(MOD)
 
@@ -51,6 +54,20 @@ verify: obj_dir/$(MOD).mk
 	$(MAKE) -C obj_dir -f $(MOD).mk -Bn \
 		OPT_FAST="$(CXXOPT)" OPT_GLOBAL="$(CXXOPT)" \
 		| grep -m1 -- '-c ' || echo "(no compile line found -- try 'make clean' first)"
+
+# --- PGO (Profile-Guided Optimization) Automation ---
+pgo-gen:
+	@echo "[PGO] Building with Profile Generation..."
+	$(MAKE) clean
+	mkdir -p $(CURDIR)/pgo_data
+	$(MAKE) all PGO_FLAGS="-fprofile-generate=$(CURDIR)/pgo_data"
+	@echo "[PGO] Step 1 Complete. Now run the emulator (make run) and exit to generate profile data."
+
+pgo-use:
+	@echo "[PGO] Building with Profile Data..."
+	$(MAKE) clean
+	$(MAKE) all PGO_FLAGS="-fprofile-use=$(CURDIR)/pgo_data -fprofile-correction -Wno-error=missing-profile"
+	@echo "[PGO] Step 2 Complete. Emulator is now perfectly optimized for your workloads!"
 
 clean:
 	rm -rf obj_dir
