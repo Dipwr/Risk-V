@@ -6,6 +6,7 @@
 
 #include "contiki.h"
 #include "ctk/ctk.h"
+#include "shell-basic.h"
 #include "shell.h"
 #include <stdio.h>
 #include <string.h>
@@ -79,6 +80,7 @@ PROCESS_THREAD(gui_shell_process, ev, data) {
   shell_file_init();
   shell_ps_init();
   shell_text_init();
+  shell_basic_init();
 
   // Build CTK Window
   ctk_window_new(&window, SHELL_GUI_XSIZE, SHELL_GUI_YSIZE + 2,

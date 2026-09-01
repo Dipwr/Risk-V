@@ -37,9 +37,9 @@
  *         Adam Dunkels <adam@sics.se>
  */
 
-#include "contiki.h"
 #include "shell-file.h"
 #include "cfs/cfs.h"
+#include "contiki.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -49,45 +49,35 @@
 
 /*---------------------------------------------------------------------------*/
 PROCESS(shell_ls_process, "ls");
-SHELL_COMMAND(ls_command,
-	      "ls",
-	      "ls <dirname>: list files",
-	      &shell_ls_process);
+SHELL_COMMAND(ls_command, "ls", "ls <dirname>: list files", &shell_ls_process);
 PROCESS(shell_append_process, "append");
-SHELL_COMMAND(append_command,
-	      "append",
-	      "append <filename>: append to file",
-	      &shell_append_process);
+SHELL_COMMAND(append_command, "append", "append <filename>: append to file",
+              &shell_append_process);
 PROCESS(shell_write_process, "write");
-SHELL_COMMAND(write_command,
-	      "write",
-	      "write <filename>: write to file",
-	      &shell_write_process);
+SHELL_COMMAND(write_command, "write", "write <filename>: write to file",
+              &shell_write_process);
 PROCESS(shell_read_process, "read");
-SHELL_COMMAND(read_command,
-	      "read",
-	      "read <filename> [offset] [block size]: read from a file, with the offset and the block size as options",
-	      &shell_read_process);
+SHELL_COMMAND(read_command, "read",
+              "read <filename> [offset] [block size]: read from a file, with "
+              "the offset and the block size as options",
+              &shell_read_process);
 PROCESS(shell_rm_process, "rm");
-SHELL_COMMAND(rm_command,
-              "rm",
-              "rm <filename>: remove the file named filename",
+SHELL_COMMAND(rm_command, "rm", "rm <filename>: remove the file named filename",
               &shell_rm_process);
 /*---------------------------------------------------------------------------*/
-PROCESS_THREAD(shell_ls_process, ev, data)
-{
+PROCESS_THREAD(shell_ls_process, ev, data) {
   static struct cfs_dir dir;
   static cfs_offset_t totsize;
   struct cfs_dirent dirent;
   char buf[32];
   PROCESS_BEGIN();
-  
-  if(data != NULL) {
-    if(cfs_opendir(&dir, data) != 0) {
+
+  if (data != NULL) {
+    if (cfs_opendir(&dir, data) != 0) {
       shell_output_str(&ls_command, "Cannot open directory", "");
     } else {
       totsize = 0;
-      while(cfs_readdir(&dir, &dirent) == 0) {
+      while (cfs_readdir(&dir, &dirent) == 0) {
         totsize += dirent.size;
         sprintf(buf, "%lu ", (unsigned long)dirent.size);
         /*      printf("'%s'\n", dirent.name);*/
@@ -101,92 +91,133 @@ PROCESS_THREAD(shell_ls_process, ev, data)
   PROCESS_END();
 }
 /*---------------------------------------------------------------------------*/
-PROCESS_THREAD(shell_append_process, ev, data)
-{
+PROCESS_THREAD(shell_append_process, ev, data) {
   static int fd = 0;
   struct shell_input *input;
+  char filename[MAX_FILENAME_LEN];
+  char *content = NULL;
 
   PROCESS_EXITHANDLER(cfs_close(fd));
-  
   PROCESS_BEGIN();
 
-  fd = cfs_open(data, CFS_WRITE | CFS_APPEND);
+  if (data != NULL) {
+    char *space = strchr((char *)data, ' ');
+    if (space != NULL) {
+      int name_len = (int)(space - (char *)data);
+      if (name_len >= MAX_FILENAME_LEN)
+        name_len = MAX_FILENAME_LEN - 1;
+      strncpy(filename, (char *)data, name_len);
+      filename[name_len] = '\0';
+      content = space + 1;
+      while (*content == ' ')
+        content++;
+    } else {
+      strncpy(filename, (char *)data, sizeof(filename) - 1);
+      filename[sizeof(filename) - 1] = '\0';
+    }
 
-  if(fd < 0) {
-    shell_output_str(&append_command,
-		     "append: could not open file for writing: ", data);
+    fd = cfs_open(filename, CFS_WRITE | CFS_APPEND);
+    if (fd < 0) {
+      shell_output_str(&append_command,
+                       "append: could not open file: ", filename);
+      PROCESS_EXIT();
+    }
+
+    if (content != NULL && strlen(content) > 0) {
+      int len = strlen(content);
+      cfs_write(fd, content, len);
+      cfs_write(fd, "\n", 1);
+      cfs_close(fd);
+      shell_output_str(&append_command, "Appended text to ", filename);
+      PROCESS_EXIT();
+    }
   } else {
-    while(1) {
-      PROCESS_WAIT_EVENT_UNTIL(ev == shell_event_input);
-      input = data;
-      /*    printf("cat input %d %d\n", input->len1, input->len2);*/
-      if(input->len1 + input->len2 == 0) {
-	cfs_close(fd);
-	PROCESS_EXIT();
-      }
-      
+    shell_output_str(&append_command, "append: missing filename", "");
+    PROCESS_EXIT();
+  }
+
+  while (1) {
+    PROCESS_WAIT_EVENT_UNTIL(ev == shell_event_input);
+    input = data;
+    if (input->len1 + input->len2 == 0) {
+      cfs_close(fd);
+      PROCESS_EXIT();
+    }
+    if (input->len1 > 0)
       cfs_write(fd, input->data1, input->len1);
+    if (input->len2 > 0)
       cfs_write(fd, input->data2, input->len2);
-      
-      shell_output(&append_command,
-		   input->data1, input->len1,
-		   input->data2, input->len2);
-    }
+    shell_output(&append_command, input->data1, input->len1, input->data2,
+                 input->len2);
   }
-  
+
   PROCESS_END();
 }
 /*---------------------------------------------------------------------------*/
-PROCESS_THREAD(shell_write_process, ev, data)
-{
+PROCESS_THREAD(shell_write_process, ev, data) {
   static int fd = 0;
   struct shell_input *input;
-  int r;
+  char filename[MAX_FILENAME_LEN];
+  char *content = NULL;
 
   PROCESS_EXITHANDLER(cfs_close(fd));
-  
   PROCESS_BEGIN();
 
-  fd = cfs_open(data, CFS_WRITE);
-
-  if(fd < 0) {
-    shell_output_str(&write_command,
-		     "write: could not open file for writing: ", data);
-  } else {
-    while(1) {
-      PROCESS_WAIT_EVENT_UNTIL(ev == shell_event_input);
-      input = data;
-      /*    printf("cat input %d %d\n", input->len1, input->len2);*/
-      if(input->len1 + input->len2 == 0) {
-	cfs_close(fd);
-	PROCESS_EXIT();
-      }
-
-      r = 0;      
-      if(input->len1 > 0) {
-	r = cfs_write(fd, input->data1, input->len1);
-      }
-
-      if(r >= 0 && input->len2 > 0) {
-	r = cfs_write(fd, input->data2, input->len2);
-      }
-
-      if(r < 0) {
-	shell_output_str(&write_command, "write: could not write to the file",
-			 NULL);
-      } else {
-	shell_output(&write_command,
-		     input->data1, input->len1,
-		     input->data2, input->len2);
-      }
+  if (data != NULL) {
+    char *space = strchr((char *)data, ' ');
+    if (space != NULL) {
+      int name_len = (int)(space - (char *)data);
+      if (name_len >= MAX_FILENAME_LEN)
+        name_len = MAX_FILENAME_LEN - 1;
+      strncpy(filename, (char *)data, name_len);
+      filename[name_len] = '\0';
+      content = space + 1;
+      while (*content == ' ')
+        content++;
+    } else {
+      strncpy(filename, (char *)data, sizeof(filename) - 1);
+      filename[sizeof(filename) - 1] = '\0';
     }
+
+    fd = cfs_open(filename, CFS_WRITE);
+    if (fd < 0) {
+      shell_output_str(&write_command,
+                       "write: could not open file: ", filename);
+      PROCESS_EXIT();
+    }
+
+    if (content != NULL && strlen(content) > 0) {
+      int len = strlen(content);
+      cfs_write(fd, content, len);
+      cfs_write(fd, "\n", 1);
+      cfs_close(fd);
+      shell_output_str(&write_command, "Wrote text to ", filename);
+      PROCESS_EXIT();
+    }
+  } else {
+    shell_output_str(&write_command, "write: missing filename", "");
+    PROCESS_EXIT();
   }
-  
+
+  while (1) {
+    PROCESS_WAIT_EVENT_UNTIL(ev == shell_event_input);
+    input = data;
+    if (input->len1 + input->len2 == 0) {
+      cfs_close(fd);
+      PROCESS_EXIT();
+    }
+    if (input->len1 > 0)
+      cfs_write(fd, input->data1, input->len1);
+    if (input->len2 > 0)
+      cfs_write(fd, input->data2, input->len2);
+    shell_output(&write_command, input->data1, input->len1, input->data2,
+                 input->len2);
+  }
+
   PROCESS_END();
 }
 /*---------------------------------------------------------------------------*/
-PROCESS_THREAD(shell_read_process, ev, data)
-{
+PROCESS_THREAD(shell_read_process, ev, data) {
   static int fd = 0;
   static int block_size = MAX_BLOCKSIZE;
   char *next;
@@ -199,21 +230,19 @@ PROCESS_THREAD(shell_read_process, ev, data)
   PROCESS_EXITHANDLER(cfs_close(fd));
   PROCESS_BEGIN();
 
-  if(data != NULL) {
+  if (data != NULL) {
     next = strchr(data, ' ');
-    if(next == NULL) {
+    if (next == NULL) {
       strncpy(filename, data, sizeof(filename));
     } else {
       len = (int)(next - (char *)data);
-      if(len <= 0) {
-	shell_output_str(&read_command,
-		       "read: filename too short: ", data);
-	PROCESS_EXIT();
+      if (len <= 0) {
+        shell_output_str(&read_command, "read: filename too short: ", data);
+        PROCESS_EXIT();
       }
-      if(len > MAX_FILENAME_LEN) {
-	shell_output_str(&read_command,
-		       "read: filename too long: ", data);
-	PROCESS_EXIT();
+      if (len > MAX_FILENAME_LEN) {
+        shell_output_str(&read_command, "read: filename too long: ", data);
+        PROCESS_EXIT();
       }
       memcpy(filename, data, len);
       filename[len] = 0;
@@ -221,65 +250,60 @@ PROCESS_THREAD(shell_read_process, ev, data)
       offset = shell_strtolong(next, NULL);
       next++;
       next = strchr(next, ' ');
-      if(next != NULL) {
-	block_size = shell_strtolong(next, NULL);
-	if(block_size > MAX_BLOCKSIZE) {
-	  shell_output_str(&read_command,
-			   "read: block size too large: ", data);
-	  PROCESS_EXIT();
+      if (next != NULL) {
+        block_size = shell_strtolong(next, NULL);
+        if (block_size > MAX_BLOCKSIZE) {
+          shell_output_str(&read_command, "read: block size too large: ", data);
+          PROCESS_EXIT();
         }
       }
     }
-    
+
     fd = cfs_open(filename, CFS_READ);
     cfs_seek(fd, offset, CFS_SEEK_SET);
-    
-    if(fd < 0) {
+
+    if (fd < 0) {
       shell_output_str(&read_command,
-		       "read: could not open file for reading: ", filename);
+                       "read: could not open file for reading: ", filename);
     } else {
-      
-      while(1) {
-	len = cfs_read(fd, buf, block_size);
-	if(len <= 0) {
-	  cfs_close(fd);
-	  PROCESS_EXIT();
-	}
-	shell_output(&read_command,
-		     buf, len, "", 0);
-	
-	process_post(&shell_read_process, PROCESS_EVENT_CONTINUE, NULL);
-	PROCESS_WAIT_EVENT_UNTIL(ev == PROCESS_EVENT_CONTINUE ||
-				 ev == shell_event_input);
-	
-	if(ev == shell_event_input) {
-	  input = data;
-	  /*    printf("cat input %d %d\n", input->len1, input->len2);*/
-	  if(input->len1 + input->len2 == 0) {
-	    cfs_close(fd);
-	    PROCESS_EXIT();
-	  }
-	}
+
+      while (1) {
+        len = cfs_read(fd, buf, block_size);
+        if (len <= 0) {
+          cfs_close(fd);
+          PROCESS_EXIT();
+        }
+        shell_output(&read_command, buf, len, "", 0);
+
+        process_post(&shell_read_process, PROCESS_EVENT_CONTINUE, NULL);
+        PROCESS_WAIT_EVENT_UNTIL(ev == PROCESS_EVENT_CONTINUE ||
+                                 ev == shell_event_input);
+
+        if (ev == shell_event_input) {
+          input = data;
+          /*    printf("cat input %d %d\n", input->len1, input->len2);*/
+          if (input->len1 + input->len2 == 0) {
+            cfs_close(fd);
+            PROCESS_EXIT();
+          }
+        }
       }
     }
   }
-  
+
   PROCESS_END();
 }
 /*---------------------------------------------------------------------------*/
-PROCESS_THREAD(shell_rm_process, ev, data)
-{
+PROCESS_THREAD(shell_rm_process, ev, data) {
   PROCESS_BEGIN();
 
-  if(data != NULL) {
+  if (data != NULL) {
     cfs_remove(data);
   }
   PROCESS_END();
 }
 /*---------------------------------------------------------------------------*/
-void
-shell_file_init(void)
-{
+void shell_file_init(void) {
   shell_register_command(&ls_command);
   shell_register_command(&write_command);
   shell_register_command(&append_command);

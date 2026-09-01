@@ -2,6 +2,7 @@
 #include "contiki.h"
 #include "ctk/ctk-draw.h"
 #include "ctk/ctk.h"
+#include "editor.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -57,6 +58,7 @@ PROCESS_THREAD(desktop_boot_process, ev, data) {
   // 3. Build "Applications" Menu (Right side)
   ctk_menu_new(&apps_menu, "  Applications  ");
   ctk_menuitem_add(&apps_menu, "Command Shell");
+  ctk_menuitem_add(&apps_menu, "Text Editor");
   ctk_menuitem_add(&apps_menu, "Calculator");
   ctk_menuitem_add(&apps_menu, "Program Launcher");
 
@@ -83,8 +85,10 @@ PROCESS_THREAD(desktop_boot_process, ev, data) {
         if (m->active == 0)
           process_start(&gui_shell_process, NULL);
         else if (m->active == 1)
-          process_start(&calc_process, NULL);
+          process_start(&editor_process, NULL);
         else if (m->active == 2)
+          process_start(&calc_process, NULL);
+        else if (m->active == 3)
           process_start(&program_handler_process, NULL);
       }
     } else if (ev == ctk_signal_window_close) {

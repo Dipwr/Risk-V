@@ -13,7 +13,11 @@
 #include "ctk/ctk-draw.h"
 #include "ctk/ctk.h"
 
+#include "editor.h" /* Included for the Graphical Text Editor */
 #include "program-handler.h"
+
+PROCESS_NAME(shell_basic_process);
+PROCESS_NAME(shell_exec_process);
 
 #define FILENAMELEN 24
 #define MAX_NUMFILES 40
@@ -176,7 +180,7 @@ static void load_dirent(void) {
       loading = 0;
       makewindow(0);
       show_statustext("Directory loaded");
-      ctk_window_redraw(&window);
+      ctk_window_open(&window);
       return;
     }
 
@@ -216,6 +220,7 @@ static void load_dirent(void) {
     show_statustext(message);
   }
 }
+
 /*-----------------------------------------------------------------------------------*/
 PROCESS_THREAD(directory_process, ev, data) {
   unsigned char i;
@@ -242,6 +247,7 @@ PROCESS_THREAD(directory_process, ev, data) {
         process_post(&directory_process, PROCESS_EVENT_CONTINUE, NULL);
       }
     } else if (ev == ctk_signal_widget_activate) {
+      /* --- WIDGET CLICK / ACTIVATE EVENT --- */
       if (data == (process_data_t)&reloadbutton) {
         for (i = 0; dscs[i] != NULL; ++i) {
           LOADER_UNLOAD_DSC(dscs[i]);
@@ -265,20 +271,37 @@ PROCESS_THREAD(directory_process, ev, data) {
         }
         CTK_WIDGET_REDRAW(&autoexitlabel);
       } else {
+        /* Handle Icon Clicks here */
         for (i = 0; dscs[i] != NULL; ++i) {
           if (data == (process_data_t)(dscs[i]->icon)) {
+            char *fname = dscs[i]->icon->title;
+            int flen = strlen(fname);
+
             if (dscs[i]->prgname && strlen(dscs[i]->prgname) > 0) {
+              /* 1. Compiled Contiki Program (.dsc) */
               program_handler_load(dscs[i]->prgname, NULL);
               if (autoexit) {
                 ctk_window_close(&window);
                 quit();
               }
+            } else if (flen >= 4 && strcmp(fname + flen - 4, ".bas") == 0) {
+              /* 2. BASIC Source Script (.bas) */
+              show_statustext("Running BASIC program...");
+              process_start(&shell_basic_process, fname);
+            } else if (flen >= 3 && strcmp(fname + flen - 3, ".sh") == 0) {
+              /* 3. Shell Batch Script (.sh) */
+              show_statustext("Running shell script...");
+              process_start(&shell_exec_process, fname);
+            } else {
+              /* 4. Text / Data file - Open in GUI Editor */
+              editor_open_file(fname);
             }
             break;
           }
         }
       }
     } else if (ev == ctk_signal_widget_select) {
+      /* --- WIDGET HOVER / SELECT EVENT --- */
       if (data == (process_data_t)&reloadbutton) {
         show_statustext("Reload directory");
       } else if (data == (process_data_t)&morebutton) {
