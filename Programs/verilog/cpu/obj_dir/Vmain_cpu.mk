@@ -37,11 +37,11 @@ VM_PREFIX = Vmain_cpu
 VM_MODPREFIX = Vmain_cpu
 # User CFLAGS (from -CFLAGS on Verilator command line)
 VM_USER_CFLAGS = \
-  -I/usr/include/SDL2 -D_GNU_SOURCE=1 -D_REENTRANT -O3 -march=native -flto -fomit-frame-pointer -fno-stack-protector -DNDEBUG -fprofile-use=/home/dpa/Documents/code/Digital_Logic/Digital/Risk-V/Programs/verilog/cpu/pgo_data -fprofile-correction -Wno-error=missing-profile \
+  -I/usr/include/SDL2 -D_GNU_SOURCE=1 -D_REENTRANT -O3 -march=native -flto=auto -fomit-frame-pointer -fno-stack-protector -fno-plt -DNDEBUG -pipe -fprofile-use=/home/dpa/Documents/code/Digital_Logic/Digital/Risk-V/Programs/verilog/cpu/pgo_data -fprofile-correction -Wno-error=missing-profile \
 
 # User LDLIBS (from -LDFLAGS on Verilator command line)
 VM_USER_LDLIBS = \
-  -lSDL2 -O3 -march=native -flto -fomit-frame-pointer -fno-stack-protector -DNDEBUG -fprofile-use=/home/dpa/Documents/code/Digital_Logic/Digital/Risk-V/Programs/verilog/cpu/pgo_data -fprofile-correction -Wno-error=missing-profile \
+  -lSDL2 -O3 -march=native -flto=auto -fomit-frame-pointer -fno-stack-protector -fno-plt -DNDEBUG -pipe -fprofile-use=/home/dpa/Documents/code/Digital_Logic/Digital/Risk-V/Programs/verilog/cpu/pgo_data -fprofile-correction -Wno-error=missing-profile \
 
 # User .cpp files (from .cpp's on Verilator command line)
 VM_USER_CLASSES = \

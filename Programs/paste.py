@@ -10,7 +10,12 @@ def main():
 	hex_file = sys.argv[1]
 	try:
 		with open(hex_file, "r") as f:
-			content = f.read().strip()
+			content = f.read()
+
+			# Ensure it ends with a newline so Wozmon executes the final 40000r command
+			if not content.endswith("\n"):
+				content += "\n"
+
 			pyperclip.copy(content)
 			print(
 				f"[+] Successfully copied '{hex_file}' ({len(content)} chars) to clipboard!"

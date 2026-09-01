@@ -21,8 +21,11 @@ def convert_bin_to_hex(input_path, output_path):
 		)
 		words.append(f"{word32:08X}")
 
+	# Wrap with Wozmon start address (40000:), words, enter (\n), and run command (40000r\n)
+	payload = f"40000: {' '.join(words)}\n40000r\n"
+
 	with open(output_path, "w") as f:
-		f.write(" ".join(words))
+		f.write(payload)
 
 
 if __name__ == "__main__":
