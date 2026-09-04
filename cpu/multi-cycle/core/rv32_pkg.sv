@@ -117,4 +117,15 @@ package rv32_pkg;
 		MEM_ADDR_ALU
 	} mem_addr_src_t;
 
+	typedef enum logic [2:0] {
+		STATE_RESET,
+		STATE_FETCH,
+		STATE_DECODE,
+		STATE_EXECUTE,
+		STATE_JALR,
+		STATE_STORE,
+		STATE_LOAD_REQ,
+		STATE_LOAD_WB
+	} fsm_state_t;
+
 endpackage
