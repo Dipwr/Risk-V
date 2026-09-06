@@ -115,7 +115,7 @@ def binary_to_hex_formats(bin_file, ihex_file, raw_hex_file):
 
 
 def main():
-	asm_file = sys.argv[1] if len(sys.argv) > 1 else "/Users/diego/Documents/code/DigitalLogic/Digital/Risk-V/Programs/asm/program.s"
+	asm_file = sys.argv[1] if len(sys.argv) > 1 else "/home/dpa/Documents/code/Digital_Logic/Digital/Risk-V/Programs/asm/program.s"
 	base_name = os.path.splitext(asm_file)[0]
 
 	ihex_file = sys.argv[2] if len(sys.argv) > 2 else f"{base_name}.intel.hex"

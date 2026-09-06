@@ -29,10 +29,10 @@ module control_fsm (
 
     //outputs to alu
     output alu_src_b_t alu_src_b,
-    output alu_op_t alu_op
-);
-    fsm_state_t fsm_state;
+    output alu_op_t alu_op,
 
+    output fsm_state_t fsm_state
+);
     always_ff @(posedge clk or posedge rst) begin
         if (rst) begin
             fsm_state <= STATE_RESET;

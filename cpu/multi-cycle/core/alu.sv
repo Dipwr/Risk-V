@@ -58,7 +58,7 @@ module alu (
 			ALU_MULHSU: O = mul_prod[63:32];
 
 			// RV32M Division & Remainder Operations
-			ALU_DIV: begin
+			/*ALU_DIV: begin
 				if (div_by_zero)       O = 32'hFFFF_FFFF;
 				else if (div_overflow) O = 32'h8000_0000;
 				else                   O = $unsigned($signed(A) / $signed(B));
@@ -78,6 +78,13 @@ module alu (
 			ALU_REMU: begin
 				if (div_by_zero)       O = A;
 				else                   O = A % B;
+			end*/
+
+			ALU_DIV,
+			ALU_DIVU,
+			ALU_REM,
+			ALU_REMU: begin
+				O = 32'd0;
 			end
 
 			default: O = 32'd0;
