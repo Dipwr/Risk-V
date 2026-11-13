@@ -14,7 +14,9 @@ module datapath (
 	input logic b_we,
 	input logic pc_we,
 	input pc_src_t pc_src,
+	input logic pc_4_we,
 	input logic ir_we,
+	input alu_src_a_t alu_src_a,
 	input alu_src_b_t alu_src_b,
 	input alu_op_t alu_op,
 
@@ -31,6 +33,7 @@ module datapath (
 );
 	//internal registers
 	logic [31:0] pc;
+	logic [31:0] pc_4;
 	logic [31:0] ir;
 	logic [31:0] reg_a;
 	logic [31:0] reg_b;
@@ -46,6 +49,7 @@ module datapath (
 	logic [31:0] rf_rdata2;
 	logic [31:0] rf_wdata;
 
+	logic [31:0] alu_in_a;
 	logic [31:0] alu_in_b;
 	logic [31:0] alu_result;
 
@@ -66,20 +70,16 @@ module datapath (
 	assign rs2    = current_instr[24:20];
 	assign rd     = current_instr[11:7];
 
-	//address adder
-	logic [31:0] pc_target;
-	assign pc_target = pc + imm;
-
 	//branch handler
 	logic branch_taken;
 	always_comb begin
 		case (funct3)
-			FUNCT3_BEQ:  branch_taken = (rf_rdata1 == rf_rdata2);
-			FUNCT3_BNE:  branch_taken = (rf_rdata1 != rf_rdata2);
-			FUNCT3_BLT:  branch_taken = ($signed(rf_rdata1) < $signed(rf_rdata2));
-			FUNCT3_BGE:  branch_taken = ($signed(rf_rdata1) >= $signed(rf_rdata2));
-			FUNCT3_BLTU: branch_taken = (rf_rdata1 < rf_rdata2);
-			FUNCT3_BGEU: branch_taken = (rf_rdata1 >= rf_rdata2);
+			FUNCT3_BEQ:  branch_taken = (reg_a == reg_b);
+			FUNCT3_BNE:  branch_taken = (reg_a != reg_b);
+			FUNCT3_BLT:  branch_taken = ($signed(reg_a) < $signed(reg_b));
+			FUNCT3_BGE:  branch_taken = ($signed(reg_a) >= $signed(reg_b));
+			FUNCT3_BLTU: branch_taken = (reg_a < reg_b);
+			FUNCT3_BGEU: branch_taken = (reg_a >= reg_b);
 			default:     branch_taken = 1'b0;
 		endcase
 	end
@@ -90,11 +90,10 @@ module datapath (
 			pc <= 32'h00000000;
 		end else if (pc_we) begin
 			case (pc_src)
-				PC_SRC_PC4:     pc <= pc + 4;
-				PC_SRC_BRANCH:  pc <= (branch_taken ? pc_target : (pc + 4));
+				PC_SRC_PC4:     pc <= pc_4;
+				PC_SRC_BRANCH:  pc <= (branch_taken ? alu_result : pc_4);
 				PC_SRC_ALU:     pc <= alu_result & ~32'd1;
-				PC_SRC_ADADDER: pc <= pc_target;
-				default:        pc <= pc + 4;
+				default:        pc <= pc_4;
 			endcase
 		end
 	end
@@ -102,14 +101,16 @@ module datapath (
 	//staging registers
 	always_ff @(posedge clk or posedge rst) begin
 		if (rst) begin
+			pc_4             <= 32'd0;
 			ir               <= 32'h0000_0013;
 			reg_a            <= 32'd0;
 			reg_b            <= 32'd0;
 			load_byte_offset <= 2'b00;
 		end else begin
-			if (ir_we) ir    <= mem_rdata;
-			if (a_we)  reg_a <= rf_rdata1;
-			if (b_we)  reg_b <= rf_rdata2;
+			if (pc_4_we)  pc_4  <= alu_result;
+			if (ir_we)    ir    <= mem_rdata;
+			if (a_we)     reg_a <= rf_rdata1;
+			if (b_we)     reg_b <= rf_rdata2;
 			if (fsm_state == STATE_LOAD_REQ) load_byte_offset <= alu_result[1:0];
 		end
 	end
@@ -162,9 +163,8 @@ module datapath (
 		case (rf_wb_src)
 			RF_WB_ALUOUT:  rf_wdata = alu_result;
 			RF_WB_MDR:     rf_wdata = mem_parsed_rdata;
-			RF_WB_PC4:     rf_wdata = pc + 4;
+			RF_WB_PC4:     rf_wdata = pc_4;
 			RF_WB_IMM:     rf_wdata = imm;
-			RF_WB_ADADDER: rf_wdata = pc_target;
 			default:       rf_wdata = alu_result;
 		endcase
 	end
@@ -187,11 +187,20 @@ module datapath (
 		.rs2O   (rf_rdata2)
 	);
 
-	assign alu_in_b = (alu_src_b == ALU_SRC_B_IMM) ? imm : reg_b;
+	assign alu_in_a = (alu_src_a == ALU_SRC_A_REG) ? reg_a : pc;
+
+	always_comb begin
+		case (alu_src_b)
+			ALU_SRC_B_REG: alu_in_b = reg_b;
+			ALU_SRC_B_IMM: alu_in_b = imm;
+			ALU_SRC_B_4:   alu_in_b = 4;
+			default:       alu_in_b = reg_b;
+		endcase
+	end
 
 	alu u_alu (
 		.alu_op (alu_op),
-		.A      (reg_a),
+		.A      (alu_in_a),
 		.B      (alu_in_b),
 		.O      (alu_result)
 	);

@@ -112,11 +112,11 @@ module vga_controller (
 		end
 	end
 
-	//16-bit rgb565 pixel demux from 32-bit vram word
+	//16-bit rgb565 pixel from 32-bit vram word
 	logic [15:0] current_pixel;
 	assign current_pixel = (pixel_sel_q == 1'b0) ? vram_data[15:0] : vram_data[31:16];
 
-	//color mapping: rgb565 to rgb444 (pmod vga dac)
+	//color mapping: rgb565 to rgb444
 	assign vga_hs = pipe_hs;
 	assign vga_vs = pipe_vs;
 

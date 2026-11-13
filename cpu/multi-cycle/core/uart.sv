@@ -16,7 +16,7 @@ module uart #(
 	input  logic        rx,
 	output logic        tx
 );
-	localparam int CLKS_PER_BIT = CLK_FREQ / BAUD; // 217 at 25 mhz
+	localparam int CLKS_PER_BIT = CLK_FREQ / BAUD; 
 
 	//2-ff rx synchronizer to prevent metastability
 	logic rx_sync_1, rx_sync_2;

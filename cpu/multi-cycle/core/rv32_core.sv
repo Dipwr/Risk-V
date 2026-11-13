@@ -21,7 +21,9 @@ module rv32_core #(
 	logic          b_we;
 	logic          pc_we;
 	pc_src_t       pc_src;
+	logic          pc_4_we;
 	logic          ir_we;
+	alu_src_a_t    alu_src_a;
 	alu_src_b_t    alu_src_b;
 	alu_op_t       alu_op;
 	fsm_state_t    fsm_state;
@@ -58,7 +60,9 @@ module rv32_core #(
 		.b_we         (b_we),
 		.pc_we        (pc_we),
 		.pc_src       (pc_src),
+		.pc_4_we      (pc_4_we),
 		.ir_we        (ir_we),
+		.alu_src_a    (alu_src_a),
 		.alu_src_b    (alu_src_b),
 		.alu_op       (alu_op),
         .fsm_state    (fsm_state)
@@ -76,7 +80,9 @@ module rv32_core #(
 		.b_we         (b_we),
 		.pc_we        (pc_we),
 		.pc_src       (pc_src),
+		.pc_4_we      (pc_4_we),
 		.ir_we        (ir_we),
+		.alu_src_a    (alu_src_a),
 		.alu_src_b    (alu_src_b),
 		.alu_op       (alu_op),
 		.mem_addr     (mem_addr),

@@ -92,23 +92,28 @@ package rv32_pkg;
 	typedef enum logic [1:0] {
 		PC_SRC_PC4, 
 		PC_SRC_BRANCH,
-		PC_SRC_ALU,
-		PC_SRC_ADADDER
+		PC_SRC_ALU
 	} pc_src_t;
 
-	// Sources for ALU input B
+	// Sources for ALU input A
 	typedef enum logic {
+		ALU_SRC_A_REG,    
+		ALU_SRC_A_PC
+	} alu_src_a_t;
+
+	// Sources for ALU input B
+	typedef enum logic [1:0] {
 		ALU_SRC_B_REG,    
-		ALU_SRC_B_IMM  
+		ALU_SRC_B_IMM,
+		ALU_SRC_B_4
 	} alu_src_b_t;
 
 	// Source for Register File writeback data
-	typedef enum logic [2:0] {
+	typedef enum logic [1:0] {
 		RF_WB_ALUOUT,   
 		RF_WB_MDR,      
 		RF_WB_PC4,
-		RF_WB_IMM,
-		RF_WB_ADADDER
+		RF_WB_IMM
 	} rf_wb_src_t;
 
 	// Address multiplexer to BRAM
@@ -117,10 +122,11 @@ package rv32_pkg;
 		MEM_ADDR_ALU
 	} mem_addr_src_t;
 
-	typedef enum logic [2:0] {
+	typedef enum logic [3:0] {
 		STATE_RESET,
 		STATE_FETCH,
 		STATE_DECODE,
+		STATE_IMM_PC,
 		STATE_EXECUTE,
 		STATE_JALR,
 		STATE_STORE,

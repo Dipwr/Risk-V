@@ -9,7 +9,7 @@ module vram #(
 	input  logic [31:0] din_a,
 	output logic [31:0] dout_a,
 
-	//port b: vga rasterizer access (read-only)
+	//port b: vga access (read-only)
 	input  logic        clk_vga,
 	input  logic        en_b,
 	input  logic [15:0] addr_b,

@@ -23,11 +23,13 @@ module control_fsm (
     //outputs to PC
     output logic pc_we,
     output pc_src_t pc_src,
+    output logic pc_4_we,
 
     //output to ir
     output logic ir_we,
 
     //outputs to alu
+    output alu_src_a_t alu_src_a,
     output alu_src_b_t alu_src_b,
     output alu_op_t alu_op,
 
@@ -44,14 +46,16 @@ module control_fsm (
 
                 STATE_DECODE: begin
                     case (opcode)
-                        OPC_BRANCH, OPC_JAL, OPC_LUI, OPC_AUIPC: fsm_state <= STATE_FETCH;
+                        OPC_BRANCH, OPC_JAL, OPC_LUI, OPC_AUIPC: fsm_state <= STATE_IMM_PC;
                         OPC_OP, OPC_OP_IMM: fsm_state <= STATE_EXECUTE;
                         OPC_JALR: fsm_state <= STATE_JALR;
                         OPC_STORE: fsm_state <= STATE_STORE;
                         OPC_LOAD: fsm_state <= STATE_LOAD_REQ;
-                        default: fsm_state <= STATE_FETCH;
+                        default: fsm_state <= STATE_IMM_PC;
                     endcase
                 end
+
+                STATE_IMM_PC: fsm_state <= STATE_FETCH;
 
                 STATE_EXECUTE: fsm_state <= STATE_FETCH;
 
@@ -78,7 +82,9 @@ module control_fsm (
 		b_we         = 1'b0;
 		pc_we        = 1'b0;
 		pc_src       = PC_SRC_PC4;
+        pc_4_we      = 1'b0;
 		ir_we        = 1'b0;
+        alu_src_a    = ALU_SRC_A_REG;
 		alu_src_b    = ALU_SRC_B_REG;
 		alu_op       = ALU_ADD;
 
@@ -95,7 +101,14 @@ module control_fsm (
                 ir_we = 1'b1;
                 a_we = 1'b1;
                 b_we = 1'b1;
+                alu_src_a = ALU_SRC_A_PC;
+                alu_src_b = ALU_SRC_B_4;
+                pc_4_we = 1'b1;
+            end
 
+            STATE_IMM_PC: begin
+                alu_src_a = ALU_SRC_A_PC;
+                alu_src_b = ALU_SRC_B_IMM;
                 case (opcode)
                     OPC_BRANCH:begin
                         pc_we = 1'b1;
@@ -105,7 +118,7 @@ module control_fsm (
                         reg_we = 1'b1;
                         rf_wb_src = RF_WB_PC4;
                         pc_we = 1'b1;
-                        pc_src = PC_SRC_ADADDER;
+                        pc_src = PC_SRC_ALU;
                     end
                     OPC_LUI: begin
                         reg_we = 1'b1;
@@ -115,11 +128,14 @@ module control_fsm (
                     end
                     OPC_AUIPC: begin
                         reg_we = 1'b1;
-                        rf_wb_src = RF_WB_ADADDER;
+                        rf_wb_src = RF_WB_ALUOUT;
                         pc_we = 1'b1;
                         pc_src = PC_SRC_PC4;
                     end
-                    default: ;
+                    default: begin
+                        pc_we = 1'b1;
+                        pc_src = PC_SRC_PC4;
+                    end
                 endcase
             end
 
