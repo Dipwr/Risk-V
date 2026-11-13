@@ -69,7 +69,9 @@ module rv32_core #(
 	);
 
 	//datapath instance
-	datapath u_datapath (
+	datapath #(
+		.RESET_PC (RESET_PC)
+	) u_datapath (
 		.clk          (clk),
 		.rst          (rst),
 		.fsm_state    (fsm_state),

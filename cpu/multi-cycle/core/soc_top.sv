@@ -1,7 +1,8 @@
 import rv32_pkg::*;
 
 module soc_top #(
-	parameter string BOOT_HEX = ""
+	parameter string BOOT_HEX = "",
+	parameter logic [31:0] RESET_PC = 32'h0000_0000
 )(
 	input logic clk_cpu,    // cpu clock (e.g. 50 mhz or 100 mhz)
 	input logic clk_vga,    // 83.46 mhz pixel clock from clk_wiz_0
@@ -121,7 +122,9 @@ module soc_top #(
 	end
 
 	//cpu instance
-	rv32_core u_core (
+	rv32_core #(
+		.RESET_PC (RESET_PC)
+	) u_core (
 		.clk       (clk_cpu),
 		.rst       (rst),
 		.mem_req   (mem_req),

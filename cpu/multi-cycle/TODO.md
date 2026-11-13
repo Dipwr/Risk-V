@@ -18,15 +18,6 @@ Directory: `cpu/multi-cycle/core/`
   - **Issue (Read Data Path):** In `STATE_LOAD_WB`, `mem_rdata` travels from the 64-BRAM mux tree through the byte/halfword shifter and sign extender directly into the register file write port without an `MDR` register.
   - **Goal:** Register the computed effective address (`alu_out`) before driving the BRAM bus, and/or register the incoming memory read data (`mdr`) before byte extraction and register file writeback.
 
-- [ ] **1.4 Remove Asynchronous Reset Loop on Register File Array to Infer `RAM32M` LUTRAM (`regfile.sv`)**
-  - **Files:** `regfile.sv:20-28`
-  - **Issue:** Resetting all 32 words of `regdata` in `if (rst)` prevents Vivado from inferring Distributed RAM (`RAM32M`) or BRAM, forcing synthesis into **1,024 Flip-Flops (`FDCE`)** plus large 32-to-1 LUT multiplexer trees.
-  - **Goal:** Remove the hardware reset loop on `regdata` (keeping `x0` hardwired to `0` on reads) so Vivado synthesizes the register file into 12 `RAM32M` primitives (48 LUTs).
-
-- [ ] **1.5 Evaluate Branch Comparator Resource Sharing (`datapath.sv`)**
-  - **Files:** `datapath.sv:74-85`
-  - **Issue:** `pc + imm` and `pc + 4` now reuse `u_alu`, leaving only the separate 32-bit `branch_taken` comparator (which currently runs in parallel with `u_alu`'s `pc + imm` calculation during `STATE_IMM_PC` so branches complete in 3 cycles).
-
 ---
 
 ## 2. Functional & ISA Implementation Bugs
@@ -35,10 +26,6 @@ Directory: `cpu/multi-cycle/core/`
   - **Files:** `alu.sv:60-88`, `Programs/compiler/build.sh:84`
   - **Issue:** `ALU_DIV`, `ALU_DIVU`, `ALU_REM`, and `ALU_REMU` are currently stubbed to return `32'd0` because combinational `/` and `%` cannot meet FPGA timing, while `build.sh` compiles with `-march=rv32im`.
   - **Goal:** Implement a sequential iterative divider (e.g., 32-cycle restoring/non-restoring divider) outside the combinational ALU path, controlled by a `STATE_DIV` state in `control_fsm` that waits for `div_done` (remembering RISC-V corner cases: divide-by-zero and signed overflow `-2^31 / -1`).
-
-- [ ] **2.3 Connect `RESET_PC` Parameter to `datapath` (`rv32_core.sv`, `datapath.sv`)**
-  - **Files:** `rv32_core.sv:3-5`, `rv32_core.sv:68`, `datapath.sv:3`, `datapath.sv:88-91`
-  - **Issue:** `rv32_core` declares `parameter logic [31:0] RESET_PC = 32'h0000_0000`, but never passes it to `u_datapath`, which hardcodes `pc <= 32'h00000000;`.
 
 - [ ] **2.4 Check Halfword Load/Store Offset Shifting (`datapath.sv`)**
   - **Files:** `datapath.sv:122`, `datapath.sv:147-150`

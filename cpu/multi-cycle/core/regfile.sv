@@ -2,7 +2,6 @@ import rv32_pkg::*;
 
 module regfile (
     input logic clk,
-    input  logic rst,
 
     input logic [4:0] rs1,
     input logic [4:0] rs2,
@@ -17,12 +16,8 @@ module regfile (
 );
     logic [31:0] regdata [32];
 
-    always_ff @(posedge clk or posedge rst) begin
-		if (rst) begin
-			for (int i = 0; i < 32; i++) begin
-				regdata[i] <= 32'd0;
-			end
-		end else if (we && (rd != 5'd0)) begin
+    always_ff @(posedge clk) begin
+		if (we && (rd != 5'd0)) begin
 			regdata[rd] <= dataIn;
 		end
 	end

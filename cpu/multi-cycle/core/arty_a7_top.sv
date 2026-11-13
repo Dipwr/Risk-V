@@ -1,4 +1,6 @@
-module arty_a7_top (
+module arty_a7_top #(
+	parameter logic [31:0] RESET_PC = 32'h0000_0000
+)(
 	input  logic       CLK100MHZ,    // pin E3 (100 mhz crystal oscillator)
 	input  logic       btn_rst,      // pin D9 (BTN0 push button, active-high)
 
@@ -37,7 +39,8 @@ module arty_a7_top (
 
 	//soc top instance
 	soc_top #(
-		.BOOT_HEX ("boot.mem")
+		.BOOT_HEX ("boot.mem"),
+		.RESET_PC (RESET_PC)
 	) u_soc_top (
 		.clk_cpu (clk_cpu),
 		.clk_vga (clk_vga),

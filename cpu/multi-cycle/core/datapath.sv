@@ -1,6 +1,8 @@
 import rv32_pkg::*;
 
-module datapath (
+module datapath #(
+	parameter logic [31:0] RESET_PC = 32'h0000_0000
+)(
 	input logic clk,
 	input logic rst,
 
@@ -87,7 +89,7 @@ module datapath (
 	//pc handler
 	always_ff @(posedge clk or posedge rst) begin
 		if (rst) begin
-			pc <= 32'h00000000;
+			pc <= RESET_PC;
 		end else if (pc_we) begin
 			case (pc_src)
 				PC_SRC_PC4:     pc <= pc_4;
@@ -177,7 +179,6 @@ module datapath (
 
 	regfile u_regfile (
 		.clk    (clk),
-		.rst    (rst),
 		.rs1    (rs1),
 		.rs2    (rs2),
 		.rd     (rd),
