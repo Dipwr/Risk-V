@@ -7,29 +7,11 @@ Directory: `cpu/multi-cycle/core/`
 
 ## 1. Architectural & Timing Bottlenecks (Fmax ~25 MHz)
 
-- [ ] **1.2 Pipeline / Multi-Cycle the 33x33 Multiplier (`alu.sv`, `control_fsm.sv`)**
-  - **Files:** `alu.sv:14-33`, `alu.sv:55-58`
-  - **Issue:** `assign mul_prod = mul_a * mul_b;` cascades 4 `DSP48E1` slices completely combinationally (`AREG=0, BREG=0, MREG=0, PREG=0`) from `alu_op` decode through `rf_wdata` writeback in a single `STATE_EXECUTE` cycle (~15–20+ ns delay).
-  - **Goal:** Split multiplication across 2–3 clock cycles (or a dedicated multiply state/pipeline) with synchronous registers so Vivado packs `AREG`/`BREG`, `MREG`, and `PREG` inside the `DSP48E1` slices.
-
-- [ ] **1.3 Add `ALUOut` and `MDR` Staging Registers on the Memory Path (`datapath.sv`, `control_fsm.sv`)**
-  - **Files:** `datapath.sv:56`, `datapath.sv:118-169`, `control_fsm.sv:187-209`, `soc_top.sv:33-55`
-  - **Issue (Address/Control Path):** In `STATE_STORE` and `STATE_LOAD_REQ`, `mem_addr` is driven directly by the combinational `alu_result` (and `mem_wbe` is shifted by `mem_addr[1:0]`), which then fans out across the entire FPGA die to **128 `RAMB36E1` blocks** (95% of the Arty A7-100T's BRAMs).
-  - **Issue (Read Data Path):** In `STATE_LOAD_WB`, `mem_rdata` travels from the 64-BRAM mux tree through the byte/halfword shifter and sign extender directly into the register file write port without an `MDR` register.
-  - **Goal:** Register the computed effective address (`alu_out`) before driving the BRAM bus, and/or register the incoming memory read data (`mdr`) before byte extraction and register file writeback.
-
----
-
-## 2. Functional & ISA Implementation Bugs
-
-- [ ] **2.2 Implement Multi-Cycle Sequential Divider for RV32M (`DIV`, `DIVU`, `REM`, `REMU`) (`alu.sv`, `control_fsm.sv`, `datapath.sv`)**
-  - **Files:** `alu.sv:60-88`, `Programs/compiler/build.sh:84`
-  - **Issue:** `ALU_DIV`, `ALU_DIVU`, `ALU_REM`, and `ALU_REMU` are currently stubbed to return `32'd0` because combinational `/` and `%` cannot meet FPGA timing, while `build.sh` compiles with `-march=rv32im`.
-  - **Goal:** Implement a sequential iterative divider (e.g., 32-cycle restoring/non-restoring divider) outside the combinational ALU path, controlled by a `STATE_DIV` state in `control_fsm` that waits for `div_done` (remembering RISC-V corner cases: divide-by-zero and signed overflow `-2^31 / -1`).
-
-- [ ] **2.4 Check Halfword Load/Store Offset Shifting (`datapath.sv`)**
-  - **Files:** `datapath.sv:122`, `datapath.sv:147-150`
-  - **Issue:** `LH`/`LHU` and `SH` only use `load_byte_offset[1]` / `mem_addr[1]` instead of the full 2-bit offset.
+- [ ] **1.3 [Deferred] Re-evaluate `ALUOut` / `MDR` Memory Staging Registers (`datapath.sv`, `control_fsm.sv`)**
+  - **Files:** `datapath.sv:62`, `datapath.sv:121-172`, `control_fsm.sv:203-225`, `soc_top.sv:34-55`
+  - **Notes:** Deferred until post-**1.2** Vivado `report_timing_summary` results are checked:
+    - **`MDR` (skip unless pipelining `FETCH` too):** `STATE_DECODE` already shares the same BRAM read mux + cross-die routing path without a staging register, so adding `MDR` (+1 cycle per `LOAD`) only trims ~1–2 ns of local byte/sign-extend muxing while `STATE_DECODE` remains at nearly the same Fmax ceiling.
+    - **`ALUOut` (conditional on timing):** Adds +1 cycle to both `STORE` (3->4) and `LOAD` (4->5), costing ~9% average CPI; only worth adding if Vivado timing shows `STATE_LOAD_REQ`/`STATE_STORE` (`u_alu -> mem_addr/mem_wbe -> 128 BRAMs`) trailing `STATE_DECODE` by >10–15%.
 
 ---
 

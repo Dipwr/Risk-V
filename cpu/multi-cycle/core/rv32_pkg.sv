@@ -67,7 +67,7 @@ package rv32_pkg;
     localparam logic [6:0] FUNCT7_SRA      = 7'b0100000;
 	localparam logic [6:0] FUNCT7_M_EXT    = 7'b0000001; 
 
-	typedef enum logic [4:0] {
+	typedef enum logic [3:0] {
 		ALU_ADD,
 		ALU_SUB,
 		ALU_AND,
@@ -77,15 +77,7 @@ package rv32_pkg;
 		ALU_SLTU,
 		ALU_SLL,
 		ALU_SRL,
-		ALU_SRA,
-		ALU_MUL,
-		ALU_MULH,
-		ALU_MULHU,
-		ALU_MULHSU,
-		ALU_DIV,
-		ALU_DIVU,
-		ALU_REM,
-		ALU_REMU
+		ALU_SRA
 	} alu_op_t;
 
 	// Source for next Program Counter
@@ -109,8 +101,10 @@ package rv32_pkg;
 	} alu_src_b_t;
 
 	// Source for Register File writeback data
-	typedef enum logic [1:0] {
-		RF_WB_ALUOUT,   
+	typedef enum logic [2:0] {
+		RF_WB_ALUOUT,
+		RF_WB_MUL,
+		RF_WB_DIV,   
 		RF_WB_MDR,      
 		RF_WB_PC4,
 		RF_WB_IMM
@@ -128,6 +122,8 @@ package rv32_pkg;
 		STATE_DECODE,
 		STATE_IMM_PC,
 		STATE_EXECUTE,
+		STATE_MUL,
+		STATE_DIV,
 		STATE_JALR,
 		STATE_STORE,
 		STATE_LOAD_REQ,

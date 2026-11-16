@@ -28,10 +28,14 @@ module control_fsm (
     //output to ir
     output logic ir_we,
 
-    //outputs to alu
+    //outputs to alu / mul / div
     output alu_src_a_t alu_src_a,
     output alu_src_b_t alu_src_b,
     output alu_op_t alu_op,
+    input  logic mul_done,
+    output logic mul_en,
+    input  logic div_done,
+    output logic div_en,
 
     output fsm_state_t fsm_state
 );
@@ -47,7 +51,18 @@ module control_fsm (
                 STATE_DECODE: begin
                     case (opcode)
                         OPC_BRANCH, OPC_JAL, OPC_LUI, OPC_AUIPC: fsm_state <= STATE_IMM_PC;
-                        OPC_OP, OPC_OP_IMM: fsm_state <= STATE_EXECUTE;
+                        OPC_OP: begin
+                            if (funct7 == FUNCT7_M_EXT) begin
+                                if (funct3 inside {FUNCT3_MUL, FUNCT3_MULH, FUNCT3_MULHSU, FUNCT3_MULHU}) begin
+                                    fsm_state <= STATE_MUL;
+                                end else begin
+                                    fsm_state <= STATE_DIV;
+                                end
+                            end else begin
+                                fsm_state <= STATE_EXECUTE;
+                            end
+                        end
+                        OPC_OP_IMM: fsm_state <= STATE_EXECUTE;
                         OPC_JALR: fsm_state <= STATE_JALR;
                         OPC_STORE: fsm_state <= STATE_STORE;
                         OPC_LOAD: fsm_state <= STATE_LOAD_REQ;
@@ -58,6 +73,10 @@ module control_fsm (
                 STATE_IMM_PC: fsm_state <= STATE_FETCH;
 
                 STATE_EXECUTE: fsm_state <= STATE_FETCH;
+
+                STATE_MUL: fsm_state <= mul_done ? STATE_FETCH : STATE_MUL;
+
+                STATE_DIV: fsm_state <= div_done ? STATE_FETCH : STATE_DIV;
 
                 STATE_JALR: fsm_state <= STATE_FETCH;
 
@@ -87,6 +106,8 @@ module control_fsm (
         alu_src_a    = ALU_SRC_A_REG;
 		alu_src_b    = ALU_SRC_B_REG;
 		alu_op       = ALU_ADD;
+		mul_en       = 1'b0;
+		div_en       = 1'b0;
 
         case (fsm_state)
             STATE_RESET: begin
@@ -151,44 +172,50 @@ module control_fsm (
                     alu_src_b = ALU_SRC_B_REG;
                 end
 
-                if ((opcode == OPC_OP) && (funct7 == FUNCT7_M_EXT))begin
-                    case (funct3)
-                        FUNCT3_MUL: alu_op = ALU_MUL;
-                        FUNCT3_MULH: alu_op = ALU_MULH;
-                        FUNCT3_MULHSU: alu_op = ALU_MULHSU;
-                        FUNCT3_MULHU: alu_op = ALU_MULHU;
-                        FUNCT3_DIV: alu_op = ALU_DIV;
-                        FUNCT3_DIVU: alu_op = ALU_DIVU;
-                        FUNCT3_REM: alu_op = ALU_REM;
-                        FUNCT3_REMU: alu_op = ALU_REMU;
-                        default: ;
-                    endcase
-                end else begin
-                    case (funct3)
-                        FUNCT3_ADD_SUB: begin
-                            if ((opcode == OPC_OP) && (funct7 == FUNCT7_SUB)) begin
-                                alu_op = ALU_SUB;
-                            end else begin
-                                alu_op = ALU_ADD;
-                            end
+                case (funct3)
+                    FUNCT3_ADD_SUB: begin
+                        if ((opcode == OPC_OP) && (funct7 == FUNCT7_SUB)) begin
+                            alu_op = ALU_SUB;
+                        end else begin
+                            alu_op = ALU_ADD;
                         end
-                        FUNCT3_SLL: alu_op = ALU_SLL;
-                        FUNCT3_SLT: alu_op = ALU_SLT;
-                        FUNCT3_SLTU: alu_op = ALU_SLTU;
-                        FUNCT3_XOR: alu_op = ALU_XOR;
-                        FUNCT3_SRL_SRA: begin
-                            if (funct7 == FUNCT7_SRA) begin
-                                alu_op = ALU_SRA;
-                            end else begin
-                                alu_op = ALU_SRL;
-                            end
+                    end
+                    FUNCT3_SLL: alu_op = ALU_SLL;
+                    FUNCT3_SLT: alu_op = ALU_SLT;
+                    FUNCT3_SLTU: alu_op = ALU_SLTU;
+                    FUNCT3_XOR: alu_op = ALU_XOR;
+                    FUNCT3_SRL_SRA: begin
+                        if (funct7 == FUNCT7_SRA) begin
+                            alu_op = ALU_SRA;
+                        end else begin
+                            alu_op = ALU_SRL;
                         end
-                        FUNCT3_OR: alu_op = ALU_OR;
-                        FUNCT3_AND: alu_op = ALU_AND;
-                        default: ;
-                    endcase
-                end
+                    end
+                    FUNCT3_OR: alu_op = ALU_OR;
+                    FUNCT3_AND: alu_op = ALU_AND;
+                    default: ;
+                endcase
 
+            end
+
+            STATE_MUL: begin
+                mul_en = 1'b1;
+                if (mul_done) begin
+                    reg_we    = 1'b1;
+                    rf_wb_src = RF_WB_MUL;
+                    pc_we     = 1'b1;
+                    pc_src    = PC_SRC_PC4;
+                end
+            end
+
+            STATE_DIV: begin
+                div_en = 1'b1;
+                if (div_done) begin
+                    reg_we    = 1'b1;
+                    rf_wb_src = RF_WB_DIV;
+                    pc_we     = 1'b1;
+                    pc_src    = PC_SRC_PC4;
+                end
             end
 
             STATE_JALR: begin

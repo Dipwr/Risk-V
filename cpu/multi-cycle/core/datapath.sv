@@ -21,6 +21,8 @@ module datapath #(
 	input alu_src_a_t alu_src_a,
 	input alu_src_b_t alu_src_b,
 	input alu_op_t alu_op,
+	input logic mul_en,
+	input logic div_en,
 
 	//mem interface
 	output logic [31:0] mem_addr,
@@ -31,7 +33,9 @@ module datapath #(
 	//to fsm
 	output opcode_t opcode,
 	output logic [2:0] funct3,
-	output logic [6:0] funct7
+	output logic [6:0] funct7,
+	output logic mul_done,
+	output logic div_done
 );
 	//internal registers
 	logic [31:0] pc;
@@ -54,6 +58,8 @@ module datapath #(
 	logic [31:0] alu_in_a;
 	logic [31:0] alu_in_b;
 	logic [31:0] alu_result;
+	logic [31:0] mul_result;
+	logic [31:0] div_result;
 
 	logic [31:0] mem_parsed_rdata;
 	logic [31:0] mem_unparsed_wdata;
@@ -121,8 +127,16 @@ module datapath #(
 	logic [7:0]  loaded_byte;
 	logic [15:0] loaded_half;
 
-	assign loaded_byte = mem_rdata >> (load_byte_offset * 8);
-	assign loaded_half = mem_rdata >> (load_byte_offset[1] * 16);
+	always_comb begin
+		case (load_byte_offset)
+			2'b00:   loaded_byte = mem_rdata[7:0];
+			2'b01:   loaded_byte = mem_rdata[15:8];
+			2'b10:   loaded_byte = mem_rdata[23:16];
+			2'b11:   loaded_byte = mem_rdata[31:24];
+		endcase
+	end
+
+	assign loaded_half = load_byte_offset[1] ? mem_rdata[31:16] : mem_rdata[15:0];
 
 	//mem handler
 	always_comb begin
@@ -149,7 +163,7 @@ module datapath #(
 				end
 				FUNCT3_SH: begin
 					mem_wdata = {2{mem_unparsed_wdata[15:0]}};
-					mem_wbe   = 4'b0011 << (mem_addr[1] * 2);
+					mem_wbe   = mem_addr[1] ? 4'b1100 : 4'b0011;
 				end
 				FUNCT3_SW: begin
 					mem_wdata = mem_unparsed_wdata;
@@ -164,6 +178,8 @@ module datapath #(
 	always_comb begin
 		case (rf_wb_src)
 			RF_WB_ALUOUT:  rf_wdata = alu_result;
+			RF_WB_MUL:     rf_wdata = mul_result;
+			RF_WB_DIV:     rf_wdata = div_result;
 			RF_WB_MDR:     rf_wdata = mem_parsed_rdata;
 			RF_WB_PC4:     rf_wdata = pc_4;
 			RF_WB_IMM:     rf_wdata = imm;
@@ -204,6 +220,28 @@ module datapath #(
 		.A      (alu_in_a),
 		.B      (alu_in_b),
 		.O      (alu_result)
+	);
+
+	mul_unit u_mul_unit (
+		.clk     (clk),
+		.rst     (rst),
+		.en      (mul_en),
+		.funct3  (funct3),
+		.rs1_val (reg_a),
+		.rs2_val (reg_b),
+		.done    (mul_done),
+		.result  (mul_result)
+	);
+
+	div_unit u_div_unit (
+		.clk     (clk),
+		.rst     (rst),
+		.en      (div_en),
+		.funct3  (funct3),
+		.rs1_val (reg_a),
+		.rs2_val (reg_b),
+		.done    (div_done),
+		.result  (div_result)
 	);
 
 endmodule

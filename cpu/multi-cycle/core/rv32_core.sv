@@ -26,6 +26,8 @@ module rv32_core #(
 	alu_src_a_t    alu_src_a;
 	alu_src_b_t    alu_src_b;
 	alu_op_t       alu_op;
+	logic          mul_en;
+	logic          div_en;
 	fsm_state_t    fsm_state;
 
 	//internal fsm memory controls
@@ -36,6 +38,8 @@ module rv32_core #(
 	opcode_t       opcode;
 	logic [2:0]    funct3;
 	logic [6:0]    funct7;
+	logic          mul_done;
+	logic          div_done;
 
 	//internal datapath byte enable
 	logic [3:0]    dp_mem_wbe;
@@ -65,6 +69,10 @@ module rv32_core #(
 		.alu_src_a    (alu_src_a),
 		.alu_src_b    (alu_src_b),
 		.alu_op       (alu_op),
+		.mul_done     (mul_done),
+		.mul_en       (mul_en),
+		.div_done     (div_done),
+		.div_en       (div_en),
         .fsm_state    (fsm_state)
 	);
 
@@ -87,13 +95,17 @@ module rv32_core #(
 		.alu_src_a    (alu_src_a),
 		.alu_src_b    (alu_src_b),
 		.alu_op       (alu_op),
+		.mul_en       (mul_en),
+		.div_en       (div_en),
 		.mem_addr     (mem_addr),
 		.mem_wdata    (mem_wdata),
 		.mem_wbe      (dp_mem_wbe),
 		.mem_rdata    (mem_rdata),
 		.opcode       (opcode),
 		.funct3       (funct3),
-		.funct7       (funct7)
+		.funct7       (funct7),
+		.mul_done     (mul_done),
+		.div_done     (div_done)
 	);
 
 endmodule
