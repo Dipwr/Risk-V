@@ -17,12 +17,6 @@ Directory: `cpu/multi-cycle/core/`
 
 ## 3. SoC, Peripherals, & FPGA Hardware Issues
 
-- [ ] **3.1 Fix UART Receiver Shift Register Overwrite & Stop-Bit Framing Check (`uart.sv`, `soc_top.sv`)**
-  - **Files:** `uart.sv:78-100`, `soc_top.sv:71-87`
-  - **Issue 1 (Data corruption):** `RX_DATA` shifts incoming bits directly into `rx_data_reg`, which is also the register read by the CPU. If a second byte starts arriving before the CPU reads the first byte, `rx_data_reg` is corrupted mid-reception. Use a separate `rx_shift_reg` and latch into `rx_data_reg` only in `RX_STOP`.
-  - **Issue 2 (Framing / break bug):** `RX_STOP` transitions to `RX_IDLE` at the middle of the stop bit and sets `rx_ready <= 1'b1` without checking `rx_sync_2 == 1'b1`. A low line (break condition or framing error) immediately re-triggers a false start bit in `RX_IDLE`.
-  - **Issue 3 (Partial address decode):** `u_uart` only checks `addr[3:0] == 4'h0` while `soc_top` asserts `uart_we`/`uart_re` for all of `is_io`, causing aliases every 16 bytes (`0x2000_0010`, `0x2000_0020`, etc.).
-
 - [ ] **3.2 Add Reset Synchronizers & Convert to Synchronous Resets for Xilinx 7-Series (`arty_a7_top.sv`, all `.sv` modules)**
   - **Files:** `arty_a7_top.sv:17-45`, all sequential `always_ff` blocks
   - **Issue 1 (Metastability on reset release):** `sys_rst = rst || !clk_locked;` combines an unsynchronized button (`btn_rst`) with `!clk_locked` and drives asynchronous resets (`posedge rst`) in both `clk_cpu` and `clk_vga` domains without synchronizing deassertion to either clock.

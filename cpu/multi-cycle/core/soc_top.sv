@@ -30,10 +30,14 @@ module soc_top #(
 	logic is_ram;
 	logic is_vram;
 	logic is_io;
+	logic is_uart;
+	logic is_vga_ctl;
 
-	assign is_ram  = (mem_addr[31:28] == 4'h0); // 0x0000_0000 - 0x0003_ffff (256 kb)
-	assign is_vram = (mem_addr[31:28] == 4'h1); // 0x1000_0000 - 0x1003_ffff (256 kb)
-	assign is_io   = (mem_addr[31:28] == 4'h2); // 0x2000_0000 - 0x2000_000f
+	assign is_ram     = (mem_addr[31:28] == 4'h0);        // 0x0000_0000 - 0x0003_ffff (256 kb)
+	assign is_vram    = (mem_addr[31:28] == 4'h1);        // 0x1000_0000 - 0x1003_ffff (256 kb)
+	assign is_io      = (mem_addr[31:8]  == 24'h2000_00); // 0x2000_0000 - 0x2000_00ff
+	assign is_uart    = is_io && (mem_addr[7:3] == 5'd0); // 0x2000_0000 - 0x2000_0007
+	assign is_vga_ctl = is_io && (mem_addr[7:0] == 8'h08);// 0x2000_0008
 
 	//memory enables
 	logic ram_en;
@@ -59,7 +63,7 @@ module soc_top #(
 	always_ff @(posedge clk_cpu or posedge rst) begin
 		if (rst) begin
 			vga_display_page <= 1'b0;
-		end else if (mem_req && is_io && (|mem_wstrb) && (mem_addr[7:0] == 8'h08)) begin
+		end else if (mem_req && is_vga_ctl && (|mem_wstrb)) begin
 			vga_display_page <= mem_wdata[0];
 		end
 	end
@@ -69,12 +73,14 @@ module soc_top #(
 	logic        uart_we;
 	logic        uart_re;
 
-	assign uart_we = mem_req && is_io && (|mem_wstrb);
-	assign uart_re = mem_req && is_io && (mem_wstrb == 4'b0000);
+	assign uart_we = mem_req && is_uart && (|mem_wstrb);
+	assign uart_re = mem_req && is_uart && (mem_wstrb == 4'b0000);
 
 	uart #(
-		.CLK_FREQ (25_000_000),
-		.BAUD     (115_200)
+		.CLK_FREQ      (25_000_000),
+		.BAUD          (115_200),
+		.RX_FIFO_DEPTH (64),
+		.TX_FIFO_DEPTH (64)
 	) u_uart (
 		.clk   (clk_cpu),
 		.rst   (rst),
@@ -92,32 +98,42 @@ module soc_top #(
 		if (rst) begin
 			io_dout <= 32'h0000_0000;
 		end else if (mem_req && is_io) begin
-			case (mem_addr[7:0])
-				8'h00:   io_dout <= uart_rdata;                 // uart rx data
-				8'h04:   io_dout <= uart_rdata;                 // uart status: bit 0 rx_ready, bit 1 tx_ready
-				8'h08:   io_dout <= {31'b0, vga_display_page};  // vga page register
-				default: io_dout <= 32'h0000_0000;
-			endcase
+			if (is_uart) begin
+				io_dout <= uart_rdata;                 // uart rx data / status
+			end else if (is_vga_ctl) begin
+				io_dout <= {31'b0, vga_display_page};  // vga page register
+			end else begin
+				io_dout <= 32'h0000_0000;
+			end
 		end
 	end
 
 	//device response tracker for 1-cycle bram read latency
-	logic [1:0] dev_sel_q;
+	typedef enum logic [1:0] {DEV_RAM, DEV_VRAM, DEV_IO, DEV_NONE} dev_sel_t;
+	dev_sel_t dev_sel_q;
 	always_ff @(posedge clk_cpu or posedge rst) begin
 		if (rst) begin
-			dev_sel_q <= 2'b00;
+			dev_sel_q <= DEV_NONE;
 		end else if (mem_req) begin
-			dev_sel_q <= mem_addr[29:28]; // 00: ram, 01: vram, 10: io
+			if (is_ram) begin
+				dev_sel_q <= DEV_RAM;
+			end else if (is_vram) begin
+				dev_sel_q <= DEV_VRAM;
+			end else if (is_io) begin
+				dev_sel_q <= DEV_IO;
+			end else begin
+				dev_sel_q <= DEV_NONE;
+			end
 		end
 	end
 
 	//return data multiplexer
 	always_comb begin
 		case (dev_sel_q)
-			2'b00:   mem_rdata = ram_dout;
-			2'b01:   mem_rdata = vram_dout;
-			2'b10:   mem_rdata = io_dout;
-			default: mem_rdata = 32'd0;
+			DEV_RAM:  mem_rdata = ram_dout;
+			DEV_VRAM: mem_rdata = vram_dout;
+			DEV_IO:   mem_rdata = io_dout;
+			default:  mem_rdata = 32'd0;
 		endcase
 	end
 
