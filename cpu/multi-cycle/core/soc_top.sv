@@ -6,7 +6,8 @@ module soc_top #(
 )(
 	input logic clk_cpu,    // cpu clock (e.g. 50 mhz or 100 mhz)
 	input logic clk_vga,    // 83.46 mhz pixel clock from clk_wiz_0
-	input logic rst,
+	input logic rst_cpu,    // synchronous reset in clk_cpu domain
+	input logic rst_vga,    // synchronous reset in clk_vga domain
 
 	//physical pmod vga pins
 	output logic        vga_hs,
@@ -60,8 +61,8 @@ module soc_top #(
 
 	//vga display page mmio register (0x2000_0008)
 	logic vga_display_page;
-	always_ff @(posedge clk_cpu or posedge rst) begin
-		if (rst) begin
+	always_ff @(posedge clk_cpu) begin
+		if (rst_cpu) begin
 			vga_display_page <= 1'b0;
 		end else if (mem_req && is_vga_ctl && (|mem_wstrb)) begin
 			vga_display_page <= mem_wdata[0];
@@ -83,7 +84,7 @@ module soc_top #(
 		.TX_FIFO_DEPTH (64)
 	) u_uart (
 		.clk   (clk_cpu),
-		.rst   (rst),
+		.rst   (rst_cpu),
 		.we    (uart_we),
 		.re    (uart_re),
 		.addr  (mem_addr[3:0]),
@@ -94,8 +95,8 @@ module soc_top #(
 	);
 
 	//io read data register (matches 1-cycle bram latency)
-	always_ff @(posedge clk_cpu or posedge rst) begin
-		if (rst) begin
+	always_ff @(posedge clk_cpu) begin
+		if (rst_cpu) begin
 			io_dout <= 32'h0000_0000;
 		end else if (mem_req && is_io) begin
 			if (is_uart) begin
@@ -111,8 +112,8 @@ module soc_top #(
 	//device response tracker for 1-cycle bram read latency
 	typedef enum logic [1:0] {DEV_RAM, DEV_VRAM, DEV_IO, DEV_NONE} dev_sel_t;
 	dev_sel_t dev_sel_q;
-	always_ff @(posedge clk_cpu or posedge rst) begin
-		if (rst) begin
+	always_ff @(posedge clk_cpu) begin
+		if (rst_cpu) begin
 			dev_sel_q <= DEV_NONE;
 		end else if (mem_req) begin
 			if (is_ram) begin
@@ -142,7 +143,7 @@ module soc_top #(
 		.RESET_PC (RESET_PC)
 	) u_core (
 		.clk       (clk_cpu),
-		.rst       (rst),
+		.rst       (rst_cpu),
 		.mem_req   (mem_req),
 		.mem_wstrb (mem_wstrb),
 		.mem_addr  (mem_addr),
@@ -190,7 +191,7 @@ module soc_top #(
 	//vga controller instance
 	vga_controller u_vga_controller (
 		.clk_vga      (clk_vga),
-		.rst          (rst),
+		.rst          (rst_vga),
 		.display_page (vga_display_page),
 		.vram_en      (vga_vram_en),
 		.vram_addr    (vga_vram_addr),

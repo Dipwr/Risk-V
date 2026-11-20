@@ -40,7 +40,7 @@ module div_unit (
 	assign shifted_rem = {rem_reg, quot_reg[31]};
 	assign sub_res     = {1'b0, shifted_rem} - {2'b00, divisor_reg};
 
-	always_ff @(posedge clk or posedge rst) begin
+	always_ff @(posedge clk) begin
 		if (rst) begin
 			div_state   <= DIV_IDLE;
 			bit_cnt     <= 5'd0;

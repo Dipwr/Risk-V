@@ -1,4 +1,5 @@
 module arty_a7_top #(
+	parameter string       BOOT_HEX = "boot.mem",
 	parameter logic [31:0] RESET_PC = 32'h0000_0000
 )(
 	input  logic       CLK100MHZ,    // pin E3 (100 mhz crystal oscillator)
@@ -15,36 +16,63 @@ module arty_a7_top #(
 	input  logic       uart_rx_pin,  // pin A9  (PC TX -> FPGA RX)
 	output logic       uart_tx_pin   // pin D10 (FPGA TX -> PC RX)
 );
-	//direct active-high reset from BTN0
-	logic rst;
-	assign rst = btn_rst;
-
 	//clock wizard outputs
 	logic clk_cpu;
 	logic clk_vga;
 	logic clk_locked;
 
-	//clocking wizard instance
+	//clocking wizard instance (requires raw asynchronous reset from BTN0)
 	clk_wiz_0 u_clk_wiz (
 		.clk_in1  (CLK100MHZ),
 		.clk_out1 (clk_cpu),     // 25 mhz cpu clock
 		.clk_out2 (clk_vga),     // 83.46 mhz pixel clock
-		.reset    (rst),
+		.reset    (btn_rst),
 		.locked   (clk_locked)
 	);
 
-	//hold soc in reset until pll is locked
-	logic sys_rst;
-	assign sys_rst = rst || !clk_locked;
+	//raw async reset asserted on BTN0 press or while pll is unlocked
+	logic async_rst;
+	assign async_rst = btn_rst || !clk_locked;
+
+	//per-domain reset synchronizers: async-assert 2-ff CDC bridge + sync fanout stage
+	(* ASYNC_REG = "TRUE" *) logic [1:0] cpu_rst_sync = 2'b11;
+	(* ASYNC_REG = "TRUE" *) logic [1:0] vga_rst_sync = 2'b11;
+	logic rst_cpu = 1'b1;
+	logic rst_vga = 1'b1;
+
+	always_ff @(posedge clk_cpu or posedge async_rst) begin
+		if (async_rst) begin
+			cpu_rst_sync <= 2'b11;
+		end else begin
+			cpu_rst_sync <= {cpu_rst_sync[0], 1'b0};
+		end
+	end
+
+	always_ff @(posedge clk_cpu) begin
+		rst_cpu <= cpu_rst_sync[1];
+	end
+
+	always_ff @(posedge clk_vga or posedge async_rst) begin
+		if (async_rst) begin
+			vga_rst_sync <= 2'b11;
+		end else begin
+			vga_rst_sync <= {vga_rst_sync[0], 1'b0};
+		end
+	end
+
+	always_ff @(posedge clk_vga) begin
+		rst_vga <= vga_rst_sync[1];
+	end
 
 	//soc top instance
 	soc_top #(
-		.BOOT_HEX ("boot.mem"),
+		.BOOT_HEX (BOOT_HEX),
 		.RESET_PC (RESET_PC)
 	) u_soc_top (
 		.clk_cpu (clk_cpu),
 		.clk_vga (clk_vga),
-		.rst     (sys_rst),
+		.rst_cpu (rst_cpu),
+		.rst_vga (rst_vga),
 		.vga_hs  (vga_hs),
 		.vga_vs  (vga_vs),
 		.vga_r   (vga_r),

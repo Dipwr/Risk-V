@@ -35,7 +35,7 @@ module uart #(
 
 	//2-ff rx synchronizer to prevent metastability
 	logic rx_sync_1, rx_sync_2;
-	always_ff @(posedge clk or posedge rst) begin
+	always_ff @(posedge clk) begin
 		if (rst) begin
 			rx_sync_1 <= 1'b1;
 			rx_sync_2 <= 1'b1;
@@ -53,7 +53,7 @@ module uart #(
 	logic [2:0]  rx_bit_idx;
 	logic [7:0]  rx_shift_reg;
 
-	always_ff @(posedge clk or posedge rst) begin
+	always_ff @(posedge clk) begin
 		if (rst) begin
 			rx_state     <= RX_IDLE;
 			rx_clk_cnt   <= 16'd0;
@@ -151,7 +151,7 @@ module uart #(
 		end
 	end
 
-	always_ff @(posedge clk or posedge rst) begin
+	always_ff @(posedge clk) begin
 		if (rst) begin
 			rx_wr_ptr <= '0;
 			rx_rd_ptr <= '0;
@@ -175,7 +175,7 @@ module uart #(
 		end
 	end
 
-	always_ff @(posedge clk or posedge rst) begin
+	always_ff @(posedge clk) begin
 		if (rst) begin
 			rx_overrun     <= 1'b0;
 			rx_framing_err <= 1'b0;
@@ -221,7 +221,7 @@ module uart #(
 		end
 	end
 
-	always_ff @(posedge clk or posedge rst) begin
+	always_ff @(posedge clk) begin
 		if (rst) begin
 			tx_wr_ptr <= '0;
 			tx_rd_ptr <= '0;
@@ -241,7 +241,7 @@ module uart #(
 		end
 	end
 
-	always_ff @(posedge clk or posedge rst) begin
+	always_ff @(posedge clk) begin
 		if (rst) begin
 			tx_state     <= TX_IDLE;
 			tx_clk_cnt   <= 16'd0;

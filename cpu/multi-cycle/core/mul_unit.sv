@@ -44,7 +44,7 @@ module mul_unit (
 	// 2 pipeline cycles + 1 writeback cycle
 	logic [1:0] cycle_cnt;
 
-	always_ff @(posedge clk or posedge rst) begin
+	always_ff @(posedge clk) begin
 		if (rst) begin
 			cycle_cnt <= 2'd0;
 		end else if (!en || (cycle_cnt == 2'd2)) begin

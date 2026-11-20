@@ -93,7 +93,7 @@ module datapath #(
 	end
 
 	//pc handler
-	always_ff @(posedge clk or posedge rst) begin
+	always_ff @(posedge clk) begin
 		if (rst) begin
 			pc <= RESET_PC;
 		end else if (pc_we) begin
@@ -107,7 +107,7 @@ module datapath #(
 	end
 
 	//staging registers
-	always_ff @(posedge clk or posedge rst) begin
+	always_ff @(posedge clk) begin
 		if (rst) begin
 			pc_4             <= 32'd0;
 			ir               <= 32'h0000_0013;

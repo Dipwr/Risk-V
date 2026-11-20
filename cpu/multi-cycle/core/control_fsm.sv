@@ -39,7 +39,7 @@ module control_fsm (
 
     output fsm_state_t fsm_state
 );
-    always_ff @(posedge clk or posedge rst) begin
+    always_ff @(posedge clk) begin
         if (rst) begin
             fsm_state <= STATE_RESET;
         end else begin

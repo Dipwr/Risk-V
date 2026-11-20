@@ -7,20 +7,25 @@
 #include <stdint.h>
 #include <sys/stat.h>
 
-#define TERM_OUT ((volatile uint32_t *)0x00080004)
-#define KEY_DATA ((volatile uint32_t *)0x00080020)
-#define KEY_STAT ((volatile uint32_t *)0x00080024)
+#define UART_DATA ((volatile uint32_t *)0x20000000)
+#define UART_STAT ((volatile uint32_t *)0x20000004)
+#define PAGE_REG  ((volatile uint32_t *)0x20000008)
+
+#define UART_RX_READY (1U << 0)
+#define UART_TX_READY (1U << 1)
 
 // Weak hook to screen renderer (if implemented by application)
 extern void term_putc(char c) __attribute__((weak));
 
-// 1. Terminal Output: connects printf(), puts(), putchar() to both MMIO and
+// 1. Terminal Output: connects printf(), puts(), putchar() to both UART and
 // Screen
 int _write(int file, char *ptr, int len) {
   (void)file;
   for (int i = 0; i < len; i++) {
     char c = *ptr++;
-    *TERM_OUT = (uint32_t)(uint8_t)c; // Send to Serial MMIO
+    while (!(*UART_STAT & UART_TX_READY))
+      ;
+    *UART_DATA = (uint32_t)(uint8_t)c; // Send to UART TX FIFO
 
     if (term_putc) {
       term_putc(c); // Draw to 320x200 Framebuffer!
@@ -29,27 +34,27 @@ int _write(int file, char *ptr, int len) {
   return len;
 }
 
-// 2. Keyboard Input
+// 2. Keyboard / UART Input
 int _read(int file, char *ptr, int len) {
   (void)file;
   int count = 0;
   while (count < len) {
-    if (*KEY_STAT & 1) {
-      *ptr++ = (char)(*KEY_DATA);
+    if (*UART_STAT & UART_RX_READY) {
+      *ptr++ = (char)(*UART_DATA);
       count++;
     }
   }
   return count;
 }
 
-// 3. Dynamic Heap Management
+// 3. Dynamic Heap Management (256 KB RAM: _stack_top at 0x0003FFF0, 32 KB stack reserve)
 extern char _end;
 static char *heap_ptr = &_end;
-#define STACK_LIMIT ((char *)0x00078000)
+#define STACK_LIMIT ((char *)0x00038000)
 
 void *_sbrk(ptrdiff_t incr) {
   char *prev_heap = heap_ptr;
-  if (heap_ptr + incr >= STACK_LIMIT) {
+  if ((heap_ptr + incr >= STACK_LIMIT) || (heap_ptr + incr < &_end)) {
     return (void *)-1;
   }
   heap_ptr += incr;
@@ -82,7 +87,6 @@ int _kill(int pid, int sig) {
 }
 int _getpid(void) { return 1; }
 
-#define PAGE_REG ((volatile uint32_t *)0x00080000)
 void _exit(int status) {
   (void)status;
   *PAGE_REG = 0;
