@@ -34,6 +34,9 @@ module datapath #(
 	output opcode_t opcode,
 	output logic [2:0] funct3,
 	output logic [6:0] funct7,
+	output opcode_t dec_opcode,
+	output logic [2:0] dec_funct3,
+	output logic [6:0] dec_funct7,
 	output logic mul_done,
 	output logic div_done
 );
@@ -67,28 +70,38 @@ module datapath #(
 
 	assign mem_addr = (mem_addr_src == MEM_ADDR_PC) ? pc : alu_result;
 
-	//instruction split
-	logic [31:0] current_instr;
-	assign current_instr = (fsm_state == STATE_DECODE) ? mem_rdata : ir;
+	//registered instruction fields (severed from mem_rdata to eliminate STA false paths)
+	assign opcode = opcode_t'(ir[6:0]);
+	assign funct3 = ir[14:12];
+	assign funct7 = ir[31:25];
+	assign rd     = ir[11:7];
 
-	assign opcode = opcode_t'(current_instr[6:0]);
-	assign funct3 = current_instr[14:12];
-	assign funct7 = current_instr[31:25];
-	assign rs1    = current_instr[19:15];
-	assign rs2    = current_instr[24:20];
-	assign rd     = current_instr[11:7];
+	//live instruction fields (only feed regfile reads & STATE_DECODE next-state FF)
+	assign dec_opcode = opcode_t'(mem_rdata[6:0]);
+	assign dec_funct3 = mem_rdata[14:12];
+	assign dec_funct7 = mem_rdata[31:25];
+	assign rs1        = mem_rdata[19:15];
+	assign rs2        = mem_rdata[24:20];
 
-	//branch handler
+	//branch handler (share 3 base comparators across all 6 branch conditions)
 	logic branch_taken;
+	logic br_eq;
+	logic br_lt_s;
+	logic br_lt_u;
+
+	assign br_eq   = (reg_a == reg_b);
+	assign br_lt_s = ($signed(reg_a) < $signed(reg_b));
+	assign br_lt_u = (reg_a < reg_b);
+
 	always_comb begin
 		case (funct3)
-			FUNCT3_BEQ:  branch_taken = (reg_a == reg_b);
-			FUNCT3_BNE:  branch_taken = (reg_a != reg_b);
-			FUNCT3_BLT:  branch_taken = ($signed(reg_a) < $signed(reg_b));
-			FUNCT3_BGE:  branch_taken = ($signed(reg_a) >= $signed(reg_b));
-			FUNCT3_BLTU: branch_taken = (reg_a < reg_b);
-			FUNCT3_BGEU: branch_taken = (reg_a >= reg_b);
-			default:     branch_taken = 1'b0;
+			FUNCT3_BEQ:  branch_taken =  br_eq;
+			FUNCT3_BNE:  branch_taken = ~br_eq;
+			FUNCT3_BLT:  branch_taken =  br_lt_s;
+			FUNCT3_BGE:  branch_taken = ~br_lt_s;
+			FUNCT3_BLTU: branch_taken =  br_lt_u;
+			FUNCT3_BGEU: branch_taken = ~br_lt_u;
+			default:     branch_taken =  1'b0;
 		endcase
 	end
 
@@ -189,7 +202,7 @@ module datapath #(
 
 	//submodules
 	imm_gen u_imm_gen (
-		.instr (current_instr),
+		.instr (ir),
 		.imm   (imm)
 	);
 

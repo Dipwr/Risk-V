@@ -103,12 +103,13 @@ module div_unit (
 		end
 	end
 
-	logic [31:0] final_quot;
-	logic [31:0] final_rem;
-	assign final_quot = q_neg_reg ? (~quot_reg + 32'd1) : quot_reg;
-	assign final_rem  = r_neg_reg ? (~rem_reg + 32'd1)  : rem_reg;
+	// Mux unsigned result and sign flag before a single shared 32-bit negator
+	logic [31:0] raw_res;
+	logic        neg_res;
+	assign raw_res = is_rem ? rem_reg : quot_reg;
+	assign neg_res = is_rem ? r_neg_reg : q_neg_reg;
 
 	assign done   = en && (div_state == DIV_DONE);
-	assign result = is_rem ? final_rem : final_quot;
+	assign result = neg_res ? (~raw_res + 32'd1) : raw_res;
 
 endmodule

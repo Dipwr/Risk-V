@@ -1,8 +1,10 @@
 import rv32_pkg::*;
 
 module soc_top #(
-	parameter string BOOT_HEX = "",
-	parameter logic [31:0] RESET_PC = 32'h0000_0000
+	parameter string       BOOT_HEX     = "",
+	parameter logic [31:0] RESET_PC     = 32'h0000_0000,
+	parameter int          CPU_CLK_FREQ = 25_000_000,
+	parameter int          UART_BAUD    = 115_200
 )(
 	input logic clk_cpu,    // cpu clock (e.g. 50 mhz or 100 mhz)
 	input logic clk_vga,    // 83.46 mhz pixel clock from clk_wiz_0
@@ -59,13 +61,23 @@ module soc_top #(
 	assign ram_word_addr  = mem_addr[17:2];
 	assign vram_word_addr = mem_addr[17:2];
 
-	//vga display page mmio register (0x2000_0008)
+	//vga display page mmio register & synced vblank status (0x2000_0008)
 	logic vga_display_page;
+	logic vga_vblank;
+	(* ASYNC_REG = "TRUE" *) logic vblank_sync_1;
+	(* ASYNC_REG = "TRUE" *) logic vblank_sync_2;
+
 	always_ff @(posedge clk_cpu) begin
 		if (rst_cpu) begin
 			vga_display_page <= 1'b0;
-		end else if (mem_req && is_vga_ctl && (|mem_wstrb)) begin
-			vga_display_page <= mem_wdata[0];
+			vblank_sync_1    <= 1'b0;
+			vblank_sync_2    <= 1'b0;
+		end else begin
+			vblank_sync_1 <= vga_vblank;
+			vblank_sync_2 <= vblank_sync_1;
+			if (mem_req && is_vga_ctl && (|mem_wstrb)) begin
+				vga_display_page <= mem_wdata[0];
+			end
 		end
 	end
 
@@ -78,8 +90,8 @@ module soc_top #(
 	assign uart_re = mem_req && is_uart && (mem_wstrb == 4'b0000);
 
 	uart #(
-		.CLK_FREQ      (25_000_000),
-		.BAUD          (115_200),
+		.CLK_FREQ      (CPU_CLK_FREQ),
+		.BAUD          (UART_BAUD),
 		.RX_FIFO_DEPTH (64),
 		.TX_FIFO_DEPTH (64)
 	) u_uart (
@@ -100,9 +112,9 @@ module soc_top #(
 			io_dout <= 32'h0000_0000;
 		end else if (mem_req && is_io) begin
 			if (is_uart) begin
-				io_dout <= uart_rdata;                 // uart rx data / status
+				io_dout <= uart_rdata;                                // uart rx data / status
 			end else if (is_vga_ctl) begin
-				io_dout <= {31'b0, vga_display_page};  // vga page register
+				io_dout <= {30'b0, vblank_sync_2, vga_display_page};  // [1] vblank, [0] display_page
 			end else begin
 				io_dout <= 32'h0000_0000;
 			end
@@ -193,6 +205,7 @@ module soc_top #(
 		.clk_vga      (clk_vga),
 		.rst          (rst_vga),
 		.display_page (vga_display_page),
+		.vblank       (vga_vblank),
 		.vram_en      (vga_vram_en),
 		.vram_addr    (vga_vram_addr),
 		.vram_data    (vga_vram_data),

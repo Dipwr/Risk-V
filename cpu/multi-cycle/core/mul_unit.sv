@@ -31,30 +31,38 @@ module mul_unit (
 		endcase
 	end
 
-	// 2-stage DSP48E1 pipeline (MREG -> PREG); inputs come directly from reg_a/reg_b FFs.
-	// No reset on pipeline regs so Vivado can pack them into DSP48E1 slices.
+	// 4-stage DSP48E1 pipeline: input regs (AREG/BREG) + MREG + cascade/output PREGs.
+	// Gated by en (CEA/CEB/CEM/CEP) and reset-free so Vivado packs into DSP48E1 slices.
+	logic signed [32:0] a_ext_q;
+	logic signed [32:0] b_ext_q;
 	logic signed [65:0] s1_prod;
 	logic signed [65:0] s2_prod;
+	logic signed [65:0] s3_prod;
 
 	always_ff @(posedge clk) begin
-		s1_prod <= a_ext * b_ext;
-		s2_prod <= s1_prod;
-	end
-
-	// 2 pipeline cycles + 1 writeback cycle
-	logic [1:0] cycle_cnt;
-
-	always_ff @(posedge clk) begin
-		if (rst) begin
-			cycle_cnt <= 2'd0;
-		end else if (!en || (cycle_cnt == 2'd2)) begin
-			cycle_cnt <= 2'd0;
-		end else begin
-			cycle_cnt <= cycle_cnt + 2'd1;
+		if (en) begin
+			a_ext_q <= a_ext;
+			b_ext_q <= b_ext;
+			s1_prod <= a_ext_q * b_ext_q;
+			s2_prod <= s1_prod;
+			s3_prod <= s2_prod;
 		end
 	end
 
-	assign done   = en && (cycle_cnt == 2'd2);
-	assign result = (funct3 == FUNCT3_MUL) ? s2_prod[31:0] : s2_prod[63:32];
+	// 4 pipeline cycles + 1 writeback cycle (5 cycles in STATE_MUL)
+	logic [2:0] cycle_cnt;
+
+	always_ff @(posedge clk) begin
+		if (rst) begin
+			cycle_cnt <= 3'd0;
+		end else if (!en || (cycle_cnt == 3'd4)) begin
+			cycle_cnt <= 3'd0;
+		end else begin
+			cycle_cnt <= cycle_cnt + 3'd1;
+		end
+	end
+
+	assign done   = en && (cycle_cnt == 3'd4);
+	assign result = (funct3 == FUNCT3_MUL) ? s3_prod[31:0] : s3_prod[63:32];
 
 endmodule

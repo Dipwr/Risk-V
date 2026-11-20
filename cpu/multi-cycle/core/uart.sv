@@ -34,7 +34,8 @@ module uart #(
 	localparam logic [TX_PTR_W:0]   TX_DEPTH_MAX = {1'b1, {TX_PTR_W{1'b0}}};
 
 	//2-ff rx synchronizer to prevent metastability
-	logic rx_sync_1, rx_sync_2;
+	(* ASYNC_REG = "TRUE" *) logic rx_sync_1;
+	(* ASYNC_REG = "TRUE" *) logic rx_sync_2;
 	always_ff @(posedge clk) begin
 		if (rst) begin
 			rx_sync_1 <= 1'b1;

@@ -2,8 +2,9 @@ module vga_controller (
 	input  logic        clk_vga,    // 83.46 mhz from clk_wiz_0
 	input  logic        rst,
 
-	//double buffering page selector (0: page 0, 1: page 1)
+	//double buffering page selector (0: page 0, 1: page 1) & vblank status
 	input  logic        display_page,
+	output logic        vblank,
 
 	//vram port b interface
 	output logic        vram_en,
@@ -74,23 +75,30 @@ module vga_controller (
 	logic [15:0] pixel_index;
 	assign pixel_index = {fb_y, 8'b0} + {2'b0, fb_y, 6'b0} + {7'b0, fb_x};
 
-	//synchronize display_page into vga clock domain
+	//synchronize display_page into vga clock domain, latch only during vblank to prevent tearing
 	(* ASYNC_REG = "TRUE" *) logic page_sync_1;
 	(* ASYNC_REG = "TRUE" *) logic page_sync_2;
+	logic active_page;
 
 	always_ff @(posedge clk_vga) begin
 		if (rst) begin
 			page_sync_1 <= 1'b0;
 			page_sync_2 <= 1'b0;
+			active_page <= 1'b0;
+			vblank      <= 1'b0;
 		end else begin
 			page_sync_1 <= display_page;
 			page_sync_2 <= page_sync_1;
+			vblank      <= (v_count >= 10'(V_ACTIVE));
+			if (v_count >= 10'(V_ACTIVE)) begin
+				active_page <= page_sync_2;
+			end
 		end
 	end
 
 	//vram word address and page base offset (page * 32768 + pixel_index/2)
 	assign vram_en   = raw_active;
-	assign vram_addr = {page_sync_2, pixel_index[15:1]};
+	assign vram_addr = {active_page, pixel_index[15:1]};
 
 	//stage 1 pipeline registers to match 1-cycle bram read latency
 	logic        pipe_hs;

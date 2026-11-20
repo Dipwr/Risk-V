@@ -8,6 +8,11 @@ module control_fsm (
     input logic [2:0] funct3,
     input logic [6:0] funct7,
 
+    //live decode fields from mem_rdata (used strictly in STATE_DECODE next-state FF)
+    input opcode_t dec_opcode,
+    input logic [2:0] dec_funct3,
+    input logic [6:0] dec_funct7,
+
     //outputs to BRAM
     output logic mem_we,
     output logic mem_req,
@@ -49,11 +54,11 @@ module control_fsm (
                 STATE_FETCH: fsm_state <= STATE_DECODE;
 
                 STATE_DECODE: begin
-                    case (opcode)
+                    case (dec_opcode)
                         OPC_BRANCH, OPC_JAL, OPC_LUI, OPC_AUIPC: fsm_state <= STATE_IMM_PC;
                         OPC_OP: begin
-                            if (funct7 == FUNCT7_M_EXT) begin
-                                if (funct3 inside {FUNCT3_MUL, FUNCT3_MULH, FUNCT3_MULHSU, FUNCT3_MULHU}) begin
+                            if (dec_funct7 == FUNCT7_M_EXT) begin
+                                if (dec_funct3 inside {FUNCT3_MUL, FUNCT3_MULH, FUNCT3_MULHSU, FUNCT3_MULHU}) begin
                                     fsm_state <= STATE_MUL;
                                 end else begin
                                     fsm_state <= STATE_DIV;

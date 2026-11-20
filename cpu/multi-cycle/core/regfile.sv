@@ -16,6 +16,13 @@ module regfile (
 );
     logic [31:0] regdata [32];
 
+    // Zero registers at time 0 so simulation never propagates X (Vivado initializes LUTRAM)
+    initial begin
+        for (int i = 0; i < 32; i++) begin
+            regdata[i] = 32'd0;
+        end
+    end
+
     always_ff @(posedge clk) begin
 		if (we && (rd != 5'd0)) begin
 			regdata[rd] <= dataIn;

@@ -38,6 +38,9 @@ module rv32_core #(
 	opcode_t       opcode;
 	logic [2:0]    funct3;
 	logic [6:0]    funct7;
+	opcode_t       dec_opcode;
+	logic [2:0]    dec_funct3;
+	logic [6:0]    dec_funct7;
 	logic          mul_done;
 	logic          div_done;
 
@@ -55,6 +58,9 @@ module rv32_core #(
 		.opcode       (opcode),
 		.funct3       (funct3),
 		.funct7       (funct7),
+		.dec_opcode   (dec_opcode),
+		.dec_funct3   (dec_funct3),
+		.dec_funct7   (dec_funct7),
 		.mem_we       (fsm_mem_we),
 		.mem_req      (fsm_mem_req),
 		.mem_addr_src (mem_addr_src),
@@ -104,6 +110,9 @@ module rv32_core #(
 		.opcode       (opcode),
 		.funct3       (funct3),
 		.funct7       (funct7),
+		.dec_opcode   (dec_opcode),
+		.dec_funct3   (dec_funct3),
+		.dec_funct7   (dec_funct7),
 		.mul_done     (mul_done),
 		.div_done     (div_done)
 	);
