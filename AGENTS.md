@@ -5,7 +5,7 @@
 Whenever a **significant change** is made to this codebase, update the root [`README.md`](README.md) to stay in sync:
 - **Architecture & RTL:** New/modified SystemVerilog modules, clock domains, reset architecture, memory maps, or MMIO registers.
 - **Software & Toolchain:** Changes to `build.sh`, `boot.s`, `linker.ld`, `syscalls.c`, bootloaders, `Programs/bsp/`, `Programs/tools/`, or applications under `Programs/apps/`.
-- **Roadmap:** Check off completed items and add evolving design goals in **Current State & Roadmap**.
+- **Roadmap:** Check off completed items and add evolving design goals in **Current State & Roadmap** across all four project phases (Phase 1 Single-Cycle -> Phase 2 Multi-Cycle FPGA SoC -> Phase 3 RV32IM Pipelined -> Phase 4 RV64/Sv39/Linux).
 
 When working from [`cpu/multi-cycle/TODO.md`](cpu/multi-cycle/TODO.md), remove completed items (and empty section headings) once verified; leave explicitly deferred items untouched.
 

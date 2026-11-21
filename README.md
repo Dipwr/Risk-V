@@ -8,9 +8,11 @@ A custom **RISC-V (RV32IM)** processor implementation developed from fundamental
 
 The primary goal of **Risk-V** is to build a complete, self-contained RISC-V computing system from scratch:
 1. **Instruction Set Architecture**: Full compliance with the unprivileged **RV32I** Base Integer ISA and the **RV32M** Standard Extension for Integer Multiplication and Division.
-2. **Two-Stage Evolutionary Roadmap**:
+2. **Four-Phase Evolutionary Roadmap**:
    - **Phase 1 (Single-Cycle & Simulation Platform)**: Educational schematic capture in [Digital](https://github.com/hneemann/Digital), Verilog export, and high-performance cycle-accurate simulation in **Verilator + SDL2** with a rich bare-metal software ecosystem.
-   - **Phase 2 (Multi-Cycle Synthesizable Core & FPGA SoC)**: Modular **SystemVerilog** rewrite optimized for physical FPGA hardware (**Digilent Arty A7-100T**), featuring hardware BRAM, dual-port VRAM, tear-free hardware VGA pixel generation (1280x800 @ 60 Hz with 4x hardware upscaling), pipelined DSP48E1 multiply / sequential divide units, and a FIFO-buffered UART controller.
+   - **Phase 2 (Multi-Cycle Synthesizable Core & FPGA SoC)**: Modular **SystemVerilog** rewrite optimized for physical FPGA hardware (**Digilent Arty A7-100T**), featuring hardware BRAM, dual-port VRAM, tear-free hardware VGA pixel generation (1280x800 @ 60 Hz with 4x hardware upscaling and selectable VSync), pipelined DSP48E1 multiply / sequential divide units, a FIFO-buffered UART controller, and a cross-platform Verilator + SDL2 + PTY simulator (`cpu/multi-cycle/sim/`).
+   - **Phase 3 (RV32IM 5-Stage Pipelined Core)**: Pipelined SystemVerilog microarchitecture (`IF/ID`, `ID/EX`, `EX/MEM`, `MEM/WB`) with RAW/load-use hazard detection, EX/MEM & MEM/WB forwarding paths, and branch control-hazard resolution.
+   - **Phase 4 (RV64 Core, Virtual Memory & Linux Boot)**: `XLEN=64` datapath scaling (`ADDW`/`SUBW`/`SLLW`/`LD`/`SD`), M-Mode/S-Mode CSRs and trap delegation, Sv39 3-level hardware Page Table Walker & TLB MMU, and OpenSBI + Device Tree + Linux kernel boot.
 3. **Full-Stack Bare-Metal Software**:
    - Adapted **Wozmon-style** interactive monitor and hex program loader in RISC-V assembly.
    - Multi-target bare-metal BSP/HAL + Newlib-nano C runtime (`Programs/bsp/`, `Programs/lib/syscalls.c`).
@@ -294,3 +296,13 @@ Key simulator features:
   - [ ] Physical hardware bring-up and verification on Arty A7-100T silicon.
   - [ ] `Zicsr` extension & trap/exception support (`TODO.md` Section 3), followed by future OS/kernel experiments.
   - [ ] Fast binary UART bootloader / interactive C BIOS shell & QSPI flash / SD card persistent storage.
+- [ ] **Phase 3: RV32IM 5-Stage Pipelined Core**
+  - [ ] Pipeline stage registers (`IF/ID`, `ID/EX`, `EX/MEM`, `MEM/WB` register slices).
+  - [ ] Hazard detection unit (load-use hazard detection, PC and `IF/ID` stall generation).
+  - [ ] Bypass / forwarding unit (`EX/MEM` to EX and `MEM/WB` to EX forwarding).
+  - [ ] Control hazard resolution (EX-stage branch target computation and `IF/ID` / `ID/EX` pipeline flush on mispredicts).
+- [ ] **Phase 4: RV64 Core, Virtual Memory & Linux Boot**
+  - [ ] 64-bit datapath scaling (`XLEN=64` PC, 32 × 64-bit register file, 64-bit ALU + `ADDW`/`SUBW`/`SLLW`, double-word `LD`/`SD`).
+  - [ ] Privileged architecture (M-Mode/S-Mode CSRs `mtvec`/`mepc`/`mcause`/`mstatus`, `CSRRW`/`CSRRS`/`CSRRC`, and trap delegation `mideleg`/`medeleg`).
+  - [ ] Virtual memory (Sv39 MMU: `SATP` & 3-level page tables, hardware Page Table Walker FSM, TLB cache).
+  - [ ] Linux kernel boot (Device Tree FDT setup, OpenSBI bootloader bring-up, and serial console Linux boot confirmation).
