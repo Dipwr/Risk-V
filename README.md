@@ -13,8 +13,8 @@ The primary goal of **Risk-V** is to build a complete, self-contained RISC-V com
    - **Phase 2 (Multi-Cycle Synthesizable Core & FPGA SoC)**: Modular **SystemVerilog** rewrite optimized for physical FPGA hardware (**Digilent Arty A7-100T**), featuring hardware BRAM, dual-port VRAM, tear-free hardware VGA pixel generation (1280x800 @ 60 Hz with 4x hardware upscaling), pipelined DSP48E1 multiply / sequential divide units, and a FIFO-buffered UART controller.
 3. **Full-Stack Bare-Metal Software**:
    - Adapted **Wozmon-style** interactive monitor and hex program loader in RISC-V assembly.
-   - Newlib-nano C runtime integration (`boot.s`, `linker.ld`, `syscalls.c`).
-   - Rich collection of demo applications: interactive Retro Desktop GUI (MicroUI), Contiki OS, FreeRTOS, 3D wireframe graphics engine, and fluid simulations.
+   - Multi-target bare-metal BSP/HAL + Newlib-nano C runtime (`Programs/bsp/`, `Programs/lib/syscalls.c`).
+   - Hardware-agnostic test & demo suite (`Programs/apps/`): RV32IM architectural test suite, 3D wireframe graphics engine, fluid dynamics solver, Mandelbrot renderer, Conway's Game of Life, and physics benchmarks.
 
 ---
 
@@ -129,28 +129,31 @@ The multi-cycle core (`rv32_core.sv`) decouples control (`control_fsm.sv`) from 
 ## 💻 Software & Ecosystem
 
 ### 1. Wozmon Interactive Bootloader
-Ported to RV32I assembly (`Programs/asm/done/visual_wozmon320x200.s`). Runs on power-up and provides an interactive terminal over UART and on-screen framebuffer:
+Ported to RV32I assembly (`Programs/bootloaders/multi_cycle/visual_wozmon320x200.s` for Phase 2, and `Programs/bootloaders/single_cycle/` for Phase 1). Runs on power-up and provides an interactive terminal over UART and on-screen framebuffer:
 - Inspect memory addresses: `<addr>` (e.g. `10000`).
 - Examine memory ranges: `<start>.<end>`.
 - Deposit data bytes: `<addr>: <val1> <val2> ...`.
 - Execute user programs: `<addr> R` (e.g. `10000 R`).
 
-### 2. Bare-Metal C Runtime & Toolchain
+### 2. Multi-Target BSP & Bare-Metal C Toolchain
 - **Compiler**: Standard RISC-V GCC toolchain (`riscv-none-elf-gcc`, `riscv64-unknown-elf-gcc`, etc.) with flags `-march=rv32im -mabi=ilp32 -O2`.
-- **Linker & Runtime**: Custom linker script `Programs/compiler/linker.ld` positioning user programs in RAM (`0x0001_0000`, `_stack_top = 0x0003_FFF0`) with proper stack and heap boundaries.
-- **Syscalls**: Lightweight Newlib-nano bridge (`Programs/compiler/syscalls.c`) targeting the Phase 2 multi-cycle MMIO map (`UART_DATA = 0x2000_0000`, `UART_STAT = 0x2000_0004` with TX-ready polling in `_write`, `PAGE_REG = 0x2000_0008`, and `STACK_LIMIT = 0x0003_8000`). *(Note: individual legacy demo `main.c` files under `Programs/compiler/programs/` still define Phase 1 `0x0008_00xx` addresses directly until migrated.)*
-- **Automation**: `Programs/compiler/build.sh` automatically compiles, links, generates binary/hex payloads, and copies the data to the clipboard for instant pasting into Wozmon via `paste.py` or serial upload via `serialpaste.py`.
+- **Target BSPs (`Programs/bsp/`)**:
+  - `bsp/include/bsp.h`: Unified HAL API (`bsp_vram_page`, `bsp_set_page`, `bsp_vblank`, `bsp_putc`, `bsp_puts`, `bsp_key_avail`, `bsp_getc`, `bsp_try_getc`, `bsp_exit`) abstracting memory maps, VRAM page strides (`64000` vs `65536` pixels), and console/UART I/O.
+  - `bsp/single_cycle/`: Phase 1 target (`0x0004_0000` RAM, `0x0008_2000` VRAM, `TERM_OUT`/`KEY_*` MMIO, Wozmon load `40000`).
+  - `bsp/multi_cycle/`: Phase 2 target (`0x0001_0000` RAM, `0x1000_0000` VRAM, polling UART + VBlank `PAGE_REG`, Wozmon load `10000`).
+- **Syscalls**: Target-agnostic Newlib-nano bridge (`Programs/lib/syscalls.c`) delegating `_write`, `_read`, `_sbrk`, and `_exit` to the active BSP HAL and linker symbols (`_end`, `_heap_limit`).
+- **Automation**: `Programs/build.sh` compiles for either `multi_cycle` (default) or `single_cycle`, emits artifacts under `Programs/out/<target>/<app>/`, generates Wozmon hex payloads via `Programs/tools/bin2hex.py`, and copies the payload to the clipboard via `Programs/tools/paste.py` (with `Programs/tools/serialpaste.py` for UART upload).
 
-### 3. Application Portfolio (`Programs/compiler/programs/`)
-- **MicroUI Retro Desktop (`simple_os/`)**: Full graphical desktop environment featuring an interactive GUI calculator, mini paint canvas with mouse support, file explorer with collapsible tree view, terminal, and theme customizer (Windows 95 and Cyberpunk themes).
-- **Contiki OS Port (`contiki_os/`)**: Event-driven multitasking OS with CTK graphical toolkit, uBasic interpreter, process manager, and shell tools.
-- **FreeRTOS & Nanoshell**: Real-time OS and lightweight console environments.
-- **3D Wireframe Graphics Engine (`wireframe/`)**: 3D matrix math rendering rotating wireframe models (Utah teapot, prism, icosahedron) parsed from standard Wavefront OBJ files.
-- **Interactive Simulations**:
-  - `fluid_sim`: Real-time grid-based fluid dynamics.
-  - `GoL`: Conway's Game of Life.
-  - `mandlebrot`: Fixed-point Mandelbrot fractal renderer.
-  - `dvd_bounce`: Bouncing logo screensaver.
+### 3. Application & Test Suite (`Programs/apps/`)
+All applications build against both `single_cycle` and `multi_cycle` targets via `bsp.h`:
+- `test_suite`: RV32IM architectural verification suite (102 base + multiply tests; optional divider tests).
+- `wireframe`: 3D matrix rotation & Bresenham wireframe renderer (models in `Programs/assets/3d/`).
+- `fluid_sim`: 2D Eulerian wind tunnel & pressure fluid solver.
+- `mandelbrot`: Fixed-point Mandelbrot fractal explorer with cosine palettes.
+- `GoL`: Conway's Game of Life.
+- `bounce_sim`: Multi-ball Q16.16 physics simulation.
+- `dvd_bounce`: Double-buffered bouncing box test.
+- `profiler_workload`: PGO and simulator benchmark combining 3D rotation and procedural rendering.
 
 ---
 
@@ -186,17 +189,17 @@ Risk-V/
 │           ├── uart.sv            # Hardware UART (64B RX/TX FIFOs, error flags)
 │           └── arty_a7_top.sv     # Top-level wrapper & reset sync for Arty A7-100T
 └── Programs/
-    ├── asm/                       # Assembly programs and Wozmon bootloaders
-    ├── 3d/                        # 3D models (OBJ) and C array converter
-    ├── paste.py                   # Clipboard helper for Wozmon hex paste
-    └── compiler/                  # C build system and application suite
-        ├── build.sh               # Interactive multi-target build script
-        ├── linker.ld              # Bare-metal linker script
-        ├── boot.s                 # Startup code (BSS clearing & main jump)
-        ├── syscalls.c             # Newlib-nano system calls bridge (Phase 2 MMIO)
-        ├── bin2hex.py             # Binary to Wozmon-compatible hex converter
-        ├── serialpaste.py         # Serial upload helper
-        └── programs/              # Bare-metal applications & OS ports
+    ├── build.sh                   # Multi-target build script (./build.sh <target> <app>)
+    ├── bsp/
+    │   ├── include/bsp.h          # Unified Hardware Abstraction Layer header
+    │   ├── single_cycle/          # Phase 1 target (linker.ld, boot.s, hal.c, target.env)
+    │   └── multi_cycle/           # Phase 2 target (linker.ld, boot.s, hal.c, target.env)
+    ├── lib/
+    │   └── syscalls.c             # Target-agnostic Newlib-nano syscall bridge
+    ├── apps/                      # Hardware-agnostic bare-metal tests & demos
+    ├── bootloaders/               # Wozmon bootloaders (single_cycle, multi_cycle) & asm demos
+    ├── assets/3d/                 # 3D models (OBJ) and C array converter
+    └── tools/                     # bin2hex.py, paste.py, serialpaste.py, rv32i_to_intel_hex.py
 ```
 
 ---
@@ -223,10 +226,11 @@ make run
 Ensure a RISC-V GCC toolchain (e.g. `riscv-none-elf-gcc`) and Python 3 are in your `PATH`.
 
 ```bash
-cd Programs/compiler
-./build.sh simple_os
+cd Programs
+./build.sh multi_cycle dvd_bounce     # Build for Phase 2 Multi-Cycle FPGA SoC (default target)
+./build.sh single_cycle dvd_bounce    # Build for Phase 1 Single-Cycle Verilator Sim
 ```
-The script will compile the application, package it into `out/program.hex`, and automatically copy the payload to your system clipboard ready to be pasted directly into Wozmon (`10000: <paste> \n 10000 R`).
+The script compiles the application, packages it into `out/<target>/<app>/program.hex`, and copies the payload to your clipboard ready to paste into Wozmon (`10000: <paste> \n 10000r` for `multi_cycle`, or `40000:` / `40000r` for `single_cycle`; pass `--no-clip` for headless builds).
 
 ### 3. Synthesizing Phase 2 for Digilent Arty A7-100T
 1. Open Xilinx Vivado (2020.2 or newer recommended).
@@ -250,7 +254,7 @@ The script will compile the application, package it into `out/program.hex`, and 
   - [x] Hardware M-extension (multiplier & sequential divider).
   - [x] Wozmon interactive bootloader.
   - [x] Bare-metal C toolchain with Newlib-nano syscalls.
-  - [x] Application portfolio (MicroUI Desktop, Contiki OS, FreeRTOS, 3D wireframe, simulations).
+  - [x] Bare-metal application & test suite (`test_suite`, `wireframe`, `fluid_sim`, `mandelbrot`, `GoL`, `bounce_sim`, `dvd_bounce`, `profiler_workload`).
 - [ ] **Phase 2: Multi-Cycle FPGA SoC Architecture**
   - [x] Modular SystemVerilog rewrite.
   - [x] Multi-cycle FSM control logic (`control_fsm.sv`) & STA false-path decoupling (`ir` vs `mem_rdata`).
@@ -259,8 +263,8 @@ The script will compile the application, package it into `out/program.hex`, and 
   - [x] Dual-port VRAM with tear-free 1280x800 VGA rasterizer (`vga_controller.sv`) & synchronized `vblank` status.
   - [x] Hardware UART (`uart.sv`) with 64-byte RX/TX FIFOs, framing/break recovery, and W1C error flags.
   - [x] Top-level Arty A7-100T wrapper (`arty_a7_top.sv`) with per-domain reset synchronizers and synchronous resets across all RTL.
-  - [x] Newlib-nano `syscalls.c` updated for Phase 2 multi-cycle MMIO map.
+  - [x] Target BSP/HAL refactoring (`Programs/bsp/`) unifying `single_cycle` and `multi_cycle` across all C apps.
   - [ ] Vivado bitstream synthesis & timing closure (including post-synthesis evaluation of deferred `ALUOut`/`mem_addr` bypass in `TODO.md`).
   - [ ] Physical hardware bring-up and verification on Arty A7-100T silicon.
-  - [ ] `Zicsr` extension & trap/exception support (`TODO.md` Section 3).
+  - [ ] `Zicsr` extension & trap/exception support (`TODO.md` Section 3), followed by future OS/kernel experiments.
   - [ ] Fast binary UART bootloader / interactive C BIOS shell & QSPI flash / SD card persistent storage.

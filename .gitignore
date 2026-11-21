@@ -1,3 +1,13 @@
 # macOS Finder metadata
 .DS_Store
 ._*
+
+# Build & simulation artifacts
+Programs/out/
+**/__pycache__/
+*.pyc
+cpu/single-cycle/verilog/obj_dir/
+cpu/single-cycle/verilog/pgo_data/
+*.o
+*.elf
+*.bin
