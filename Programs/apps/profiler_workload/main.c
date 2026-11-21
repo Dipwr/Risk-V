@@ -147,6 +147,9 @@ int main(void) {
   uint8_t angle_y = 0;
   uint8_t angle_z = 0;
 
+  // Run uncapped (>60 FPS) for CPU/simulator throughput benchmarking
+  bsp_set_vsync(0);
+
   // Profiling frame limit (run 1000 full frames, or until keypress)
   const uint32_t TOTAL_FRAMES = 100000;
 
@@ -198,7 +201,7 @@ int main(void) {
     }
 
     // 4. Hardware Page Flip via MMIO
-    bsp_set_page((int)back_page);
+    bsp_present_page((int)back_page);
     active_page = back_page;
 
     angle_x += 2;

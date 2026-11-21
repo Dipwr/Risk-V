@@ -85,6 +85,8 @@ int main(void) {
 
   clear_buffer_page(0, COLOR_WHITE);
   clear_buffer_page(1, COLOR_WHITE);
+  int vsync_on = 0;
+  bsp_set_vsync(vsync_on);
   bsp_set_page(0);
 
   uint8_t angle_x = 127;
@@ -92,8 +94,13 @@ int main(void) {
 
   while (1) {
     if (bsp_key_avail()) {
-      (void)bsp_getc();
-      break;
+      char k = bsp_getc();
+      if (k == 'v' || k == 'V') {
+        vsync_on ^= 1;
+        bsp_set_vsync(vsync_on);
+      } else {
+        break;
+      }
     }
 
     uint32_t back_page = active_page ^ 1;
@@ -145,12 +152,13 @@ int main(void) {
     }
 
     active_page = back_page;
-    bsp_set_page((int)active_page);
+    bsp_present_page((int)active_page);
 
     angle_x += 1;
     angle_y += 2;
   }
 
+  bsp_set_vsync(1);
   bsp_set_page(0);
   clear_buffer_page(0, COLOR_WHITE);
   return 0;

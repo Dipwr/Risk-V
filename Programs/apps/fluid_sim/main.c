@@ -745,7 +745,7 @@ int main(void) {
     render_fluid_frame(back_page);
 
     // 4. Double-Buffered Frame Flip
-    bsp_set_page((int)back_page);
+    bsp_present_page((int)back_page);
     active_page = back_page;
   }
 

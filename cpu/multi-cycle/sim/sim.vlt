@@ -1,0 +1,15 @@
+`verilator_config
+
+// Expose clock wizard outputs so sim_main.cpp drives exact clk_cpu / clk_vga phases
+public_flat_rw -module "clk_wiz_0" -var "sim_clk_cpu"
+public_flat_rw -module "clk_wiz_0" -var "sim_clk_vga"
+
+// Expose RAM for optional --boot / --load preloading without touching core RTL
+public_flat_rw -module "bram_ram" -var "mem"
+
+// Expose VRAM and vga_controller/soc_top VGA state for Fast VGA mode
+public_flat_rd -module "vram" -var "mem"
+public_flat_rd -module "vga_controller" -var "active_page"
+public_flat_rw -module "vga_controller" -var "v_count"
+public_flat_rd -module "soc_top" -var "vga_display_page"
+public_flat_rd -module "soc_top" -var "vga_no_vsync"

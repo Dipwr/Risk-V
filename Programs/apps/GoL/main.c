@@ -308,7 +308,7 @@ int main(void) {
 
     uint32_t back_page = 1 - active_page;
     render_grid(back_page);
-    bsp_set_page((int)back_page);
+    bsp_present_page((int)back_page);
     active_page = back_page;
 
     for (volatile int delay = 0; delay < 30000; delay++)

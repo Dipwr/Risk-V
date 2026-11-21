@@ -61,22 +61,32 @@ module soc_top #(
 	assign ram_word_addr  = mem_addr[17:2];
 	assign vram_word_addr = mem_addr[17:2];
 
-	//vga display page mmio register & synced vblank status (0x2000_0008)
+	//vga display page mmio register & synced status (0x2000_0008)
 	logic vga_display_page;
+	logic vga_no_vsync;
 	logic vga_vblank;
+	logic vga_active_page;
 	(* ASYNC_REG = "TRUE" *) logic vblank_sync_1;
 	(* ASYNC_REG = "TRUE" *) logic vblank_sync_2;
+	(* ASYNC_REG = "TRUE" *) logic active_page_sync_1;
+	(* ASYNC_REG = "TRUE" *) logic active_page_sync_2;
 
 	always_ff @(posedge clk_cpu) begin
 		if (rst_cpu) begin
-			vga_display_page <= 1'b0;
-			vblank_sync_1    <= 1'b0;
-			vblank_sync_2    <= 1'b0;
+			vga_display_page   <= 1'b0;
+			vga_no_vsync       <= 1'b0;
+			vblank_sync_1      <= 1'b0;
+			vblank_sync_2      <= 1'b0;
+			active_page_sync_1 <= 1'b0;
+			active_page_sync_2 <= 1'b0;
 		end else begin
-			vblank_sync_1 <= vga_vblank;
-			vblank_sync_2 <= vblank_sync_1;
+			vblank_sync_1      <= vga_vblank;
+			vblank_sync_2      <= vblank_sync_1;
+			active_page_sync_1 <= vga_active_page;
+			active_page_sync_2 <= active_page_sync_1;
 			if (mem_req && is_vga_ctl && (|mem_wstrb)) begin
 				vga_display_page <= mem_wdata[0];
+				vga_no_vsync     <= mem_wdata[1];
 			end
 		end
 	end
@@ -114,7 +124,8 @@ module soc_top #(
 			if (is_uart) begin
 				io_dout <= uart_rdata;                                // uart rx data / status
 			end else if (is_vga_ctl) begin
-				io_dout <= {30'b0, vblank_sync_2, vga_display_page};  // [1] vblank, [0] display_page
+				// [3] no_vsync, [2] active_page, [1] vblank, [0] display_page
+				io_dout <= {28'b0, vga_no_vsync, active_page_sync_2, vblank_sync_2, vga_display_page};
 			end else begin
 				io_dout <= 32'h0000_0000;
 			end
@@ -205,7 +216,9 @@ module soc_top #(
 		.clk_vga      (clk_vga),
 		.rst          (rst_vga),
 		.display_page (vga_display_page),
+		.no_vsync     (vga_no_vsync),
 		.vblank       (vga_vblank),
+		.active_page  (vga_active_page),
 		.vram_en      (vga_vram_en),
 		.vram_addr    (vga_vram_addr),
 		.vram_data    (vga_vram_data),

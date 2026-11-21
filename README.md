@@ -59,7 +59,7 @@ The primary goal of **Risk-V** is to build a complete, self-contained RISC-V com
 - **Memory & Video Subsystem**:
   - **Main RAM** (`bram_ram.sv`): 256 KB Block RAM initialized with boot payload (`BOOT_HEX`, default `"boot.mem"`).
   - **Dual-Port VRAM** (`vram.sv`): 256 KB true dual-port RAM holding two 128 KB 320x200 RGB565 framebuffers (Port A: CPU R/W, Port B: VGA Rasterizer).
-  - **Hardware VGA Controller** (`vga_controller.sv`): Multiplier-free address generator (`(y << 8) + (y << 6) + x`) with zero-LUT page concatenation (`{active_page, pixel_index[15:1]}`), VBlank page latching to eliminate screen tearing, synchronized `vblank` status output back to `clk_cpu`, 4x hardware pixel upscaling (320x200 -> 1280x800), and 2-stage registered `vga_r/g/b` + `vga_hs/vs` outputs for IOB packing.
+  - **Hardware VGA Controller** (`vga_controller.sv`): Multiplier-free address generator (`(y << 8) + (y << 6) + x`) with zero-LUT page concatenation (`{active_page, pixel_index[15:1]}`), VBlank page latching with software-selectable VSync bypass (`no_vsync` bit for immediate uncapped flips), synchronized `vblank` and `active_page` status outputs back to `clk_cpu`, 4x hardware pixel upscaling (320x200 -> 1280x800), and 2-stage registered `vga_r/g/b` + `vga_hs/vs` outputs for IOB packing.
   - **UART Controller** (`uart.sv`): Parameterized `CLK_FREQ`/`BAUD` (default 115200 8N1), 64-byte LUTRAM-inferred RX and TX circular FIFOs, isolated RX shift register, stop-bit framing check and line-break recovery (`RX_WAIT_IDLE`), `ASYNC_REG` 2-FF RX synchronizer, sticky W1C error flags (`rx_overrun`, `rx_framing_err`), RX FIFO flush, and `tx_idle` status.
 
 ```
@@ -78,7 +78,7 @@ The primary goal of **Risk-V** is to build a complete, self-contained RISC-V com
 |   UART Data (TX/RX)  | 0x2000_0000  |              | 4 B    | R: RX pop / W: TX push |
 |   UART Status / Ctrl | 0x2000_0004  |              | 4 B    | R:[0]rx_rdy [1]tx_rdy [2]ovr [3]frm [4]tx_idle |
 |                      |              |              |        | W:[2]clr_ovr [3]clr_frm [4]rx_flush |
-|   VGA Page / VBlank  | 0x2000_0008  |              | 4 B    | W:[0]page (VBlank-latched); R:[0]page [1]vblank |
+|   VGA Page / VSync   | 0x2000_0008  |              | 4 B    | W:[0]page [1]no_vsync; R:[0]page [1]vblank [2]active_page [3]no_vsync |
 +----------------------+--------------+--------------+--------+----------------+
 ```
 
@@ -138,7 +138,7 @@ Ported to RV32I assembly (`Programs/bootloaders/multi_cycle/visual_wozmon320x200
 ### 2. Multi-Target BSP & Bare-Metal C Toolchain
 - **Compiler**: Standard RISC-V GCC toolchain (`riscv-none-elf-gcc`, `riscv64-unknown-elf-gcc`, etc.) with flags `-march=rv32im -mabi=ilp32 -O2`.
 - **Target BSPs (`Programs/bsp/`)**:
-  - `bsp/include/bsp.h`: Unified HAL API (`bsp_vram_page`, `bsp_set_page`, `bsp_vblank`, `bsp_putc`, `bsp_puts`, `bsp_key_avail`, `bsp_getc`, `bsp_try_getc`, `bsp_exit`) abstracting memory maps, VRAM page strides (`64000` vs `65536` pixels), and console/UART I/O.
+  - `bsp/include/bsp.h`: Unified HAL API (`bsp_vram_page`, `bsp_set_page`, `bsp_set_vsync`, `bsp_vblank`, `bsp_active_page`, `bsp_wait_vblank`, `bsp_present_page`, `bsp_putc`, `bsp_puts`, `bsp_key_avail`, `bsp_getc`, `bsp_try_getc`, `bsp_exit`) abstracting memory maps, VRAM page strides (`64000` vs `65536` pixels), VSync/active-page handoff, and console/UART I/O.
   - `bsp/single_cycle/`: Phase 1 target (`0x0004_0000` RAM, `0x0008_2000` VRAM, `TERM_OUT`/`KEY_*` MMIO, Wozmon load `40000`).
   - `bsp/multi_cycle/`: Phase 2 target (`0x0001_0000` RAM, `0x1000_0000` VRAM, polling UART + VBlank `PAGE_REG`, Wozmon load `10000`).
 - **Syscalls**: Target-agnostic Newlib-nano bridge (`Programs/lib/syscalls.c`) delegating `_write`, `_read`, `_sbrk`, and `_exit` to the active BSP HAL and linker symbols (`_end`, `_heap_limit`).
@@ -147,7 +147,7 @@ Ported to RV32I assembly (`Programs/bootloaders/multi_cycle/visual_wozmon320x200
 ### 3. Application & Test Suite (`Programs/apps/`)
 All applications build against both `single_cycle` and `multi_cycle` targets via `bsp.h`:
 - `test_suite`: RV32IM architectural verification suite (102 base + multiply tests; optional divider tests).
-- `wireframe`: 3D matrix rotation & Bresenham wireframe renderer (models in `Programs/assets/3d/`).
+- `wireframe`: 3D matrix rotation & Bresenham wireframe renderer with live VSync ON/OFF toggle (`v`) (models in `Programs/assets/3d/`).
 - `fluid_sim`: 2D Eulerian wind tunnel & pressure fluid solver.
 - `mandelbrot`: Fixed-point Mandelbrot fractal explorer with cosine palettes.
 - `GoL`: Conway's Game of Life.
@@ -172,22 +172,28 @@ Risk-V/
 │   │   └── verilog/               # Verilog export & Verilator SDL2 testbench
 │   └── multi-cycle/               # Phase 2: Multi-Cycle FPGA Core
 │       ├── TODO.md                # Active architectural, timing & Zicsr backlog
-│       └── core/                  # SystemVerilog RTL implementation
-│           ├── rv32_pkg.sv        # Package with opcodes, funct3/7, ALU & FSM types
-│           ├── rv32_core.sv       # CPU core top (links FSM & Datapath)
-│           ├── control_fsm.sv     # Multi-cycle control state machine
-│           ├── datapath.sv        # Register file, ALU/MUL/DIV, imm gen, PC logic
-│           ├── regfile.sv         # 32 x 32-bit LUTRAM-inferred register file
-│           ├── alu.sv             # RV32I 10-op combinational ALU
-│           ├── mul_unit.sv        # 4-stage en-gated DSP48E1 RV32M multiplier
-│           ├── div_unit.sv        # 32-step restoring RV32M divider
-│           ├── imm_gen.sv         # Immediate decoder (I, S, B, U, J types)
-│           ├── soc_top.sv         # SoC interconnect, BRAM, VRAM, MMIO & CDC
-│           ├── bram_ram.sv        # 256 KB internal program Block RAM
-│           ├── vram.sv            # 256 KB dual-port video RAM
-│           ├── vga_controller.sv  # 1280x800 @ 60Hz tear-free 4x upscaled VGA
-│           ├── uart.sv            # Hardware UART (64B RX/TX FIFOs, error flags)
-│           └── arty_a7_top.sv     # Top-level wrapper & reset sync for Arty A7-100T
+│       ├── core/                  # SystemVerilog RTL implementation
+│       │   ├── rv32_pkg.sv        # Package with opcodes, funct3/7, ALU & FSM types
+│       │   ├── rv32_core.sv       # CPU core top (links FSM & Datapath)
+│       │   ├── control_fsm.sv     # Multi-cycle control state machine
+│       │   ├── datapath.sv        # Register file, ALU/MUL/DIV, imm gen, PC logic
+│       │   ├── regfile.sv         # 32 x 32-bit LUTRAM-inferred register file
+│       │   ├── alu.sv             # RV32I 10-op combinational ALU
+│       │   ├── mul_unit.sv        # 4-stage en-gated DSP48E1 RV32M multiplier
+│       │   ├── div_unit.sv        # 32-step restoring RV32M divider
+│       │   ├── imm_gen.sv         # Immediate decoder (I, S, B, U, J types)
+│       │   ├── soc_top.sv         # SoC interconnect, BRAM, VRAM, MMIO & CDC
+│       │   ├── bram_ram.sv        # 256 KB internal program Block RAM
+│       │   ├── vram.sv            # 256 KB dual-port video RAM
+│       │   ├── vga_controller.sv  # 1280x800 @ 60Hz tear-free 4x upscaled VGA
+│       │   ├── uart.sv            # Hardware UART (64B RX/TX FIFOs, error flags)
+│       │   └── arty_a7_top.sv     # Top-level wrapper & reset sync for Arty A7-100T
+│       └── sim/                   # Verilator + SDL2 + PTY simulator for arty_a7_top
+│           ├── clk_wiz_0.sv       # Behavioral MMCM stub for Verilator
+│           ├── sim.vlt            # Verilator config exposing clock/RAM/VRAM hooks
+│           ├── gen_boot_mem.py    # Converts Wozmon .bin to 65536-word boot.mem
+│           ├── sim_main.cpp       # SDL2 + bit-accurate UART PTY + dual-mode VGA harness
+│           └── Makefile           # Build, lint, PGO, and run targets
 └── Programs/
     ├── build.sh                   # Multi-target build script (./build.sh <target> <app>)
     ├── bsp/
@@ -232,7 +238,26 @@ cd Programs
 ```
 The script compiles the application, packages it into `out/<target>/<app>/program.hex`, and copies the payload to your clipboard ready to paste into Wozmon (`10000: <paste> \n 10000r` for `multi_cycle`, or `40000:` / `40000r` for `single_cycle`; pass `--no-clip` for headless builds).
 
-### 3. Synthesizing Phase 2 for Digilent Arty A7-100T
+### 3. Running the Phase 2 Verilator Simulator (`arty_a7_top`)
+Supports both **Linux** (`verilator`, `libsdl2-dev`, `make`) and **macOS** (`brew install verilator sdl2`, plus a RISC-V GCC toolchain to assemble `boot.mem`). You can develop, boot Wozmon, upload programs over UART, and view VGA output identically to the Arty A7-100T without physical FPGA hardware:
+
+```bash
+cd cpu/multi-cycle/sim
+make -j$(nproc)      # Assembles visual_wozmon320x200.s -> boot.mem & builds Varty_a7_top (macOS: -j$(sysctl -n hw.ncpu))
+make run             # Fast VGA mode (VRAM + 60 Hz VBlank cadence)
+make run-pin         # Pin-accurate VGA mode (83.46 MHz vga_hs/vga_vs/vga_r/g/b sampling)
+make strict          # Rebuild with --x-assign/initial unique to catch uninitialized FF/RAM bugs
+make lint            # Strict verilator --lint-only (zero -Wno-* suppressions)
+```
+
+For maximum simulation speed, Profile-Guided Optimization (`make pgo-gen`, run briefly with `make run`, then `make pgo-use`) works on both Linux GCC and macOS Apple Clang.
+
+Key simulator features:
+- **Exact FPGA Top (`arty_a7_top`)**: Simulates `arty_a7_top.sv` directly (with a behavioral `clk_wiz_0.sv` stub), exercising `BTN0` reset synchronizers, BRAM boot initialization (`boot.mem`), 115200 8N1 UART pins, and VGA pins.
+- **Virtual Serial Port (PTY)**: Works on Linux and macOS. On startup, the simulator prints a PTY path (e.g. `/dev/pts/4` or `/dev/ttys004`, or pass `--uart-link /tmp/arty_uart`). Connect with `picocom -b 115200 <pty>` or upload apps identically to hardware using `python3 Programs/tools/serialpaste.py --port <pty> Programs/out/multi_cycle/<app>/program.hex` (automatically runs `<addr>r` with no stray newline so apps stay running; pass `--no-run` to `serialpaste.py` or `bin2hex.py` to load without running).
+- **SDL2 Controls & Direct Preloading**: Type or paste (`Ctrl+V` / `PASTE` button) directly in the SDL2 window, toggle `BTN0 RESET` (`F1` / `Ctrl+R`), switch `VGA: FAST` / `VGA: PIN` live (`F2`), or skip UART transfer during rapid C development with `--load ../../../Programs/out/multi_cycle/<app>/program.bin` (and `--headless` for CI/scripted runs).
+
+### 4. Synthesizing Phase 2 for Digilent Arty A7-100T
 1. Open Xilinx Vivado (2020.2 or newer recommended).
 2. Create an RTL project targeting `xc7a100tcsg324-1`.
 3. Add all SystemVerilog files from `cpu/multi-cycle/core/` (including `mul_unit.sv` and `div_unit.sv`).
@@ -260,9 +285,10 @@ The script compiles the application, packages it into `out/<target>/<app>/progra
   - [x] Multi-cycle FSM control logic (`control_fsm.sv`) & STA false-path decoupling (`ir` vs `mem_rdata`).
   - [x] Complete RV32IM datapath (`datapath.sv`) with dedicated 4-stage `DSP48E1` `mul_unit.sv` and 32-step `div_unit.sv`.
   - [x] SoC integration (`soc_top.sv`) with strict MMIO decode & parameterized `CPU_CLK_FREQ` / `RESET_PC`.
-  - [x] Dual-port VRAM with tear-free 1280x800 VGA rasterizer (`vga_controller.sv`) & synchronized `vblank` status.
+  - [x] Dual-port VRAM with tear-free 1280x800 VGA rasterizer (`vga_controller.sv`), software-selectable VSync (`no_vsync`), and synchronized `vblank` / `active_page` status.
   - [x] Hardware UART (`uart.sv`) with 64-byte RX/TX FIFOs, framing/break recovery, and W1C error flags.
   - [x] Top-level Arty A7-100T wrapper (`arty_a7_top.sv`) with per-domain reset synchronizers and synchronous resets across all RTL.
+  - [x] Cross-platform (Linux & macOS) Verilator + SDL2 + PTY simulator (`cpu/multi-cycle/sim/`) targeting `arty_a7_top.sv` with Fast & Pin-Accurate VGA modes and PGO support.
   - [x] Target BSP/HAL refactoring (`Programs/bsp/`) unifying `single_cycle` and `multi_cycle` across all C apps.
   - [ ] Vivado bitstream synthesis & timing closure (including post-synthesis evaluation of deferred `ALUOut`/`mem_addr` bypass in `TODO.md`).
   - [ ] Physical hardware bring-up and verification on Arty A7-100T silicon.

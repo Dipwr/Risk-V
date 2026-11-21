@@ -395,7 +395,7 @@ int main(void) {
       }
 
       active_page = back_page;
-      bsp_set_page((int)active_page);
+      bsp_present_page((int)active_page);
       needs_redraw = 0;
     }
 

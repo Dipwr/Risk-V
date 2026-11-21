@@ -95,7 +95,7 @@ int main(void) {
 
     draw_rect(back_page, x, y, BOX_WIDTH, BOX_HEIGHT, color_palette[color_idx]);
 
-    bsp_set_page((int)back_page);
+    bsp_present_page((int)back_page);
     active_page = back_page;
 
     for (volatile int delay = 0; delay < 20000; delay++)

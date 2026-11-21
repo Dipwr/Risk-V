@@ -8,6 +8,9 @@ Programs/out/
 *.pyc
 cpu/single-cycle/verilog/obj_dir/
 cpu/single-cycle/verilog/pgo_data/
+cpu/multi-cycle/sim/obj_dir/
+cpu/multi-cycle/sim/pgo_data/
+cpu/multi-cycle/sim/boot.mem
 *.o
 *.elf
 *.bin

@@ -310,7 +310,7 @@ int main(void) {
       draw_filled_circle(back_page, cx, cy, r, balls[i].color);
     }
 
-    bsp_set_page((int)back_page);
+    bsp_present_page((int)back_page);
     active_page = back_page;
   }
 

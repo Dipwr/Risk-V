@@ -24,7 +24,11 @@ static inline volatile uint16_t *bsp_vram_page(int page) {
 }
 
 void bsp_set_page(int page);
+void bsp_set_vsync(int enable);
 int bsp_vblank(void);
+int bsp_active_page(void);
+void bsp_wait_vblank(void);
+void bsp_present_page(int page);
 void bsp_putc(char c);
 void bsp_puts(const char *s);
 int bsp_key_avail(void);

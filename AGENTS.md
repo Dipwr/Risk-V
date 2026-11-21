@@ -4,7 +4,7 @@
 
 Whenever a **significant change** is made to this codebase, update the root [`README.md`](README.md) to stay in sync:
 - **Architecture & RTL:** New/modified SystemVerilog modules, clock domains, reset architecture, memory maps, or MMIO registers.
-- **Software & Toolchain:** Changes to `build.sh`, `boot.s`, `linker.ld`, `syscalls.c`, bootloaders, or applications under `Programs/compiler/programs/`.
+- **Software & Toolchain:** Changes to `build.sh`, `boot.s`, `linker.ld`, `syscalls.c`, bootloaders, `Programs/bsp/`, `Programs/tools/`, or applications under `Programs/apps/`.
 - **Roadmap:** Check off completed items and add evolving design goals in **Current State & Roadmap**.
 
 When working from [`cpu/multi-cycle/TODO.md`](cpu/multi-cycle/TODO.md), remove completed items (and empty section headings) once verified; leave explicitly deferred items untouched.
@@ -25,5 +25,6 @@ All Phase 2 RTL under `cpu/multi-cycle/core/` targets Xilinx Artix-7 synthesis a
 
 ## 3. Verification Before Completing RTL Changes
 
-- **Strict Verilator lint:** After modifying any SystemVerilog module under `cpu/multi-cycle/core/`, run `verilator --lint-only` with **zero `-Wno-*` suppressions** on `rv32_core` and `soc_top` (and `arty_a7_top` with a behavioral `clk_wiz_0` stub if changed), verifying 0 errors and 0 warnings.
+- **Strict Verilator lint:** After modifying any SystemVerilog module under `cpu/multi-cycle/core/`, run `make -C cpu/multi-cycle/sim lint` (which runs `verilator --lint-only` with **zero `-Wno-*` suppressions** on `rv32_core`, `soc_top`, and `arty_a7_top` with `cpu/multi-cycle/sim/clk_wiz_0.sv`), verifying 0 errors and 0 warnings.
+- **Keep core RTL simulation-clean & sim harness portable:** Keep `cpu/multi-cycle/core/` free of simulation-only stubs or test hooks; expose internal signals for the simulator via `cpu/multi-cycle/sim/sim.vlt` instead. Keep `cpu/multi-cycle/sim/` portable across **Linux and macOS** (`<util.h>` vs `<pty.h>`, Clang `-flto=thin` vs GCC `-flto=auto`, no `-lutil` or Linux-only flags on `Darwin`).
 - **Functional simulation:** Verify behavioral changes with `verilator --binary --assert` testbenches in the conversation scratch directory — do not commit temporary testbenches or `obj_*` build artifacts into `cpu/multi-cycle/core/`.
