@@ -7,7 +7,7 @@ A custom **RISC-V (RV32IM)** processor implementation developed from fundamental
 ## 📌 Project Overview & Goals
 
 The primary goal of **Risk-V** is to build a complete, self-contained RISC-V computing system from scratch:
-1. **Instruction Set Architecture**: Full compliance with the unprivileged **RV32I** Base Integer ISA, the **RV32M** Standard Extension for Integer Multiplication and Division, and **`Zicsr` / `Zicntr`** CSR & hardware performance counter support in Phase 2.
+1. **Instruction Set Architecture**: Full compliance with the unprivileged **RV32I** Base Integer ISA, the **RV32M** Standard Extension for Integer Multiplication and Division, and **`Zicsr` / `Zicntr`** CSRs plus synchronous **M-mode trap/exception handling** (`ECALL`/`EBREAK`/`MRET`, `mstatus`/`mtvec`/`mepc`/`mcause`/`mtval`) in Phase 2.
 2. **Four-Phase Evolutionary Roadmap**:
    - **Phase 1 (Single-Cycle & Simulation Platform)**: Educational schematic capture in [Digital](https://github.com/hneemann/Digital), Verilog export, and high-performance cycle-accurate simulation in **Verilator + SDL2** with a rich bare-metal software ecosystem.
    - **Phase 2 (Multi-Cycle Synthesizable Core & FPGA SoC)**: Modular **SystemVerilog** rewrite optimized for physical FPGA hardware (**Digilent Arty A7-100T**), featuring hardware BRAM, dual-port VRAM, tear-free hardware VGA pixel generation (1280x800 @ 60 Hz with 4x hardware upscaling and selectable VSync), pipelined DSP48E1 multiply / sequential divide units, a FIFO-buffered UART controller, and a cross-platform Verilator + SDL2 + PTY simulator (`cpu/multi-cycle/sim/`).
@@ -104,28 +104,31 @@ The multi-cycle core (`rv32_core.sv`) decouples control (`control_fsm.sv`) from 
         |                     +-------------------+
         |                     |   STATE_DECODE    |
         |                     +-------------------+
-        |       /      /     /     |       \      \       \          \
-        |      v      v     v      v        v      v       v          v
-        | +--------+ +---+ +---+ +-----+ +-----+ +----+ +-----+ +--------------+
-        | |STATE_  | |EX | |CSR| |STATE| |STATE| |JALR| |STORE| |STATE_LOAD_REQ|
-        | |IMM_PC  | |   | |   | |_MUL | |_DIV | |    | |     | +--------------+
-        | +--------+ +---+ +---+ +-----+ +-----+ +----+ +-----+        |
-        |     |        |     |   (5 cyc) (2/34c)   |       |           v
-        |     |        |     |     |       |       |       |    +--------------+
-        |     |        |     |     |       |       |       |    |STATE_LOAD_WB |
-        |     |        |     |     |       |       |       |    +--------------+
-        |     \________|_____|_____|_______|_______|_______|___________/
+        |       /      /     /     |       \      \       \        \       \      \
+        |      v      v     v      v        v      v       v        v       v      v
+        | +--------+ +---+ +---+ +-----+ +-----+ +----+ +-----+ +------+ +----+ +----+
+        | |STATE_  | |EX | |CSR| |STATE| |STATE| |JALR| |STORE| |LOAD_ | |TRAP| |MRET|
+        | |IMM_PC  | |   | |   | |_MUL | |_DIV | |    | |     | |REQ   | |    | |    |
+        | +--------+ +---+ +---+ +-----+ +-----+ +----+ +-----+ +------+ +----+ +----+
+        |     |        |     |   (5 cyc) (2/34c)   |       |       |        |      |
+        |     |        |     |     |       |       |       |       v        |      |
+        |     |        |     |     |       |       |       |    +------+    |      |
+        |     |        |     |     |       |       |       |    |LOAD_ |    |      |
+        |     |        |     |     |       |       |       |    |WB    |    |      |
+        |     |        |     |     |       |       |       |    +------+    |      |
+        |     \________|_____|_____|_______|_______|_______|_______|________|______/
         +--------------------------------+
 ```
 
 - **Instruction Fetch (`STATE_FETCH`)**: Asserts `mem_req` with `mem_addr = pc`.
-- **Instruction Decode & Register Fetch (`STATE_DECODE`)**: Latches `ir <= mem_rdata`, reads `regfile` (`RAM32M`, no runtime reset) into `reg_a`/`reg_b`, computes `pc_4 = pc + 4` via `u_alu`, and selects the next FSM state from live `dec_opcode`/`dec_funct3`/`dec_funct7`.
-- **PC-Relative / Upper-Immediate / Branch (`STATE_IMM_PC`)**: Completes `BRANCH` (using 3 shared base comparators for `BEQ`/`BNE`/`BLT`/`BGE`/`BLTU`/`BGEU`), `JAL`, `LUI`, `AUIPC`, and unimplemented/NOP opcodes.
+- **Instruction Decode & Register Fetch (`STATE_DECODE`)**: Latches `ir <= mem_rdata`, reads `regfile` (`RAM32M`, no runtime reset) into `reg_a`/`reg_b`, computes `pc_4 = pc + 4` via `u_alu`, and selects the next FSM state from live `dec_opcode`/`dec_funct3`/`dec_funct7`/`dec_funct12`/`dec_rs1_zero`/`dec_rd_zero` (routing `ECALL`, `EBREAK`, and illegal encodings to `STATE_TRAP` and `MRET` to `STATE_MRET`).
+- **PC-Relative / Upper-Immediate / Branch (`STATE_IMM_PC`)**: Completes `BRANCH` (using 3 shared base comparators for `BEQ`/`BNE`/`BLT`/`BGE`/`BLTU`/`BGEU`), `JAL` (with misaligned target detection), `LUI`, `AUIPC`, and `FENCE`/`PAUSE` NOPs.
 - **Execute (`STATE_EXECUTE`)**: Single-cycle RV32I ALU operations (`alu.sv`, 10 ops).
-- **CSR Access (`STATE_CSR`)**: Dedicated `csr_unit.sv` — single-cycle atomic RMW execution (`CSRRW`/`CSRRS`/`CSRRC`/`CSRRWI`/`CSRRSI`/`CSRRCI`, 3 cycles total) with `rd == x0` / `rs1 == x0` / `zimm == 0` side-effect suppression, 64-bit `cycle`/`time`/`instret` counters (`0xC00`–`0xC82`), writable `mcycle`/`minstret` aliases (`0xB00`–`0xB82`), `mscratch` (`0x340`), and hardwired `misa`/`mvendorid`/`marchid`/`mimpid`/`mhartid`.
+- **CSR Access (`STATE_CSR`)**: Dedicated `csr_unit.sv` — single-cycle atomic RMW execution (`CSRRW`/`CSRRS`/`CSRRC`/`CSRRWI`/`CSRRSI`/`CSRRCI`, 3 cycles total) with `rd == x0` / `rs1 == x0` / `zimm == 0` side-effect suppression, 64-bit `cycle`/`time`/`instret` counters (`0xC00`–`0xC82`), writable `mcycle`/`minstret` aliases (`0xB00`–`0xB82`), M-mode trap CSRs (`mstatus`, `mtvec`, `mscratch`, `mepc`, `mcause`, `mtval`), and hardwired `misa`/`mvendorid`/`marchid`/`mimpid`/`mhartid`, with illegal/read-only CSR trap detection.
+- **Trap & Return (`STATE_TRAP`, `STATE_MRET`)**: Synchronous M-mode exception handling for `ECALL`, `EBREAK`, illegal instructions/CSRs, and misaligned instruction/load/store addresses (suppressing side effects and `instret`), plus `MRET` state restoration (`MIE <= MPIE`, `pc <= mepc`).
 - **Multiply (`STATE_MUL`)**: Dedicated `mul_unit.sv` — 4-stage `en`-gated `DSP48E1` pipeline (`a_ext_q`/`b_ext_q` + `s1..s3_prod`), completing `MUL`/`MULH`/`MULHSU`/`MULHU` in 5 cycles in `STATE_MUL` (7 cycles total).
 - **Divide (`STATE_DIV`)**: Dedicated `div_unit.sv` — 32-step restoring binary divider with a shared post-negator and 2-cycle fast-paths for divide-by-zero and signed `-2^31 / -1` overflow (34 cycles normal in `STATE_DIV`).
-- **Memory Access (`STATE_STORE`, `STATE_LOAD_REQ` -> `STATE_LOAD_WB`)**: Single-cycle request for stores, two-cycle request/writeback for loads to match synchronous BRAM read latency.
+- **Memory Access (`STATE_STORE`, `STATE_LOAD_REQ` -> `STATE_LOAD_WB`)**: Single-cycle request for stores, two-cycle request/writeback for loads to match synchronous BRAM read latency, with misaligned halfword/word address detection and `mem_req`/`mem_we` suppression.
 
 ---
 
@@ -174,13 +177,13 @@ Risk-V/
 │   │   ├── digital/               # Digital logic schematics (.dig files)
 │   │   └── verilog/               # Verilog export & Verilator SDL2 testbench
 │   └── multi-cycle/               # Phase 2: Multi-Cycle FPGA Core
-│       ├── TODO.md                # Active architectural, timing & trap backlog
+│       ├── TODO.md                # Deferred post-synthesis timing backlog
 │       ├── core/                  # SystemVerilog RTL implementation
-│       │   ├── rv32_pkg.sv        # Package with opcodes, funct3/7, CSRs, ALU & FSM types
+│       │   ├── rv32_pkg.sv        # Package with opcodes, funct3/7/12, CSRs, causes, ALU & FSM types
 │       │   ├── rv32_core.sv       # CPU core top (links FSM & Datapath)
 │       │   ├── control_fsm.sv     # Multi-cycle control state machine
-│       │   ├── csr_unit.sv        # Zicsr unit, 64-bit cycle/instret counters & M-mode info CSRs
-│       │   ├── datapath.sv        # Register file, ALU/MUL/DIV/CSR, imm gen, PC logic
+│       │   ├── csr_unit.sv        # Zicsr unit, 64-bit counters, M-mode info/trap CSRs & illegal_csr
+│       │   ├── datapath.sv        # Register file, ALU/MUL/DIV/CSR, alignment/trap_val, imm gen, PC logic
 │       │   ├── regfile.sv         # 32 x 32-bit LUTRAM-inferred register file
 │       │   ├── alu.sv             # RV32I 10-op combinational ALU
 │       │   ├── mul_unit.sv        # 4-stage en-gated DSP48E1 RV32M multiplier
@@ -295,9 +298,9 @@ Key simulator features:
   - [x] Cross-platform (Linux & macOS) Verilator + SDL2 + PTY simulator (`cpu/multi-cycle/sim/`) targeting `arty_a7_top.sv` with Fast & Pin-Accurate VGA modes and PGO support.
   - [x] Target BSP/HAL refactoring (`Programs/bsp/`) unifying `single_cycle` and `multi_cycle` across all C apps.
   - [x] `Zicsr` CSR instructions & `Zicntr`/M-mode counter & info CSRs (`csr_unit.sv`, `STATE_CSR`).
+  - [x] Trap/exception & M-mode privilege support (illegal-instruction/CSR & misaligned-address decode, `mstatus`/`mtvec`/`mepc`/`mcause`/`mtval`, `ECALL`/`EBREAK`/`MRET`, `STATE_TRAP`/`STATE_MRET`).
   - [ ] Vivado bitstream synthesis & timing closure (including post-synthesis evaluation of deferred `ALUOut`/`mem_addr` bypass in `TODO.md`).
-  - [ ] Physical hardware bring-up and verification on Arty A7-100T silicon.
-  - [ ] Trap/exception & M-mode privilege support (`TODO.md` 3.2: illegal-instruction/misaligned decode, `mtvec`/`mepc`/`mcause`/`mstatus`, `ECALL`/`EBREAK`/`MRET`), followed by future OS/kernel experiments.
+  - [ ] Physical hardware bring-up and verification on Arty A7-100T silicon, followed by future OS/kernel experiments.
   - [ ] Fast binary UART bootloader / interactive C BIOS shell & QSPI flash / SD card persistent storage.
 - [ ] **Phase 3: RV32IM 5-Stage Pipelined Core**
   - [ ] Pipeline stage registers (`IF/ID`, `ID/EX`, `EX/MEM`, `MEM/WB` register slices).
@@ -306,6 +309,6 @@ Key simulator features:
   - [ ] Control hazard resolution (EX-stage branch target computation and `IF/ID` / `ID/EX` pipeline flush on mispredicts).
 - [ ] **Phase 4: RV64 Core, Virtual Memory & Linux Boot**
   - [ ] 64-bit datapath scaling (`XLEN=64` PC, 32 × 64-bit register file, 64-bit ALU + `ADDW`/`SUBW`/`SLLW`, double-word `LD`/`SD`).
-  - [ ] Privileged architecture (M-Mode/S-Mode CSRs `mtvec`/`mepc`/`mcause`/`mstatus`, `CSRRW`/`CSRRS`/`CSRRC`, and trap delegation `mideleg`/`medeleg`).
+  - [ ] Privileged architecture (S-Mode/U-Mode CSRs `stvec`/`sepc`/`scause`/`sstatus`/`stval`, `SRET`, trap delegation `mideleg`/`medeleg`, and `CLINT`/`PLIC` interrupts).
   - [ ] Virtual memory (Sv39 MMU: `SATP` & 3-level page tables, hardware Page Table Walker FSM, TLB cache).
   - [ ] Linux kernel boot (Device Tree FDT setup, OpenSBI bootloader bring-up, and serial console Linux boot confirmation).

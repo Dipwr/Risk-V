@@ -29,6 +29,10 @@ module rv32_core #(
 	logic          mul_en;
 	logic          div_en;
 	logic          csr_en;
+	logic          trap_en;
+	logic          mret_en;
+	logic [31:0]   trap_cause;
+	trap_val_src_t trap_val_src;
 	logic          instret_inc;
 	fsm_state_t    fsm_state;
 
@@ -43,6 +47,13 @@ module rv32_core #(
 	opcode_t       dec_opcode;
 	logic [2:0]    dec_funct3;
 	logic [6:0]    dec_funct7;
+	logic [11:0]   dec_funct12;
+	logic          dec_rs1_zero;
+	logic          dec_rd_zero;
+	logic          csr_illegal;
+	logic          inst_misaligned;
+	logic          load_misaligned;
+	logic          store_misaligned;
 	logic          mul_done;
 	logic          div_done;
 
@@ -57,12 +68,19 @@ module rv32_core #(
 	control_fsm u_control_fsm (
 		.clk          (clk),
 		.rst          (rst),
-		.opcode       (opcode),
-		.funct3       (funct3),
-		.funct7       (funct7),
-		.dec_opcode   (dec_opcode),
-		.dec_funct3   (dec_funct3),
-		.dec_funct7   (dec_funct7),
+		.opcode           (opcode),
+		.funct3           (funct3),
+		.funct7           (funct7),
+		.dec_opcode       (dec_opcode),
+		.dec_funct3       (dec_funct3),
+		.dec_funct7       (dec_funct7),
+		.dec_funct12      (dec_funct12),
+		.dec_rs1_zero     (dec_rs1_zero),
+		.dec_rd_zero      (dec_rd_zero),
+		.csr_illegal      (csr_illegal),
+		.inst_misaligned  (inst_misaligned),
+		.load_misaligned  (load_misaligned),
+		.store_misaligned (store_misaligned),
 		.mem_we       (fsm_mem_we),
 		.mem_req      (fsm_mem_req),
 		.mem_addr_src (mem_addr_src),
@@ -82,6 +100,10 @@ module rv32_core #(
 		.div_done     (div_done),
 		.div_en       (div_en),
 		.csr_en       (csr_en),
+		.trap_en      (trap_en),
+		.mret_en      (mret_en),
+		.trap_cause   (trap_cause),
+		.trap_val_src (trap_val_src),
 		.instret_inc  (instret_inc),
         .fsm_state    (fsm_state)
 	);
@@ -108,17 +130,28 @@ module rv32_core #(
 		.mul_en       (mul_en),
 		.div_en       (div_en),
 		.csr_en       (csr_en),
+		.trap_en      (trap_en),
+		.mret_en      (mret_en),
+		.trap_cause   (trap_cause),
+		.trap_val_src (trap_val_src),
 		.instret_inc  (instret_inc),
 		.mem_addr     (mem_addr),
 		.mem_wdata    (mem_wdata),
 		.mem_wbe      (dp_mem_wbe),
 		.mem_rdata    (mem_rdata),
-		.opcode       (opcode),
-		.funct3       (funct3),
-		.funct7       (funct7),
-		.dec_opcode   (dec_opcode),
-		.dec_funct3   (dec_funct3),
-		.dec_funct7   (dec_funct7),
+		.opcode           (opcode),
+		.funct3           (funct3),
+		.funct7           (funct7),
+		.dec_opcode       (dec_opcode),
+		.dec_funct3       (dec_funct3),
+		.dec_funct7       (dec_funct7),
+		.dec_funct12      (dec_funct12),
+		.dec_rs1_zero     (dec_rs1_zero),
+		.dec_rd_zero      (dec_rd_zero),
+		.csr_illegal      (csr_illegal),
+		.inst_misaligned  (inst_misaligned),
+		.load_misaligned  (load_misaligned),
+		.store_misaligned (store_misaligned),
 		.mul_done     (mul_done),
 		.div_done     (div_done)
 	);

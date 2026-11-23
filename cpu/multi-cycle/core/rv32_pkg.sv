@@ -14,6 +14,8 @@ package rv32_pkg;
 	} opcode_t;
 
 	// Branch conditions (OPC_BRANCH)
+	localparam logic [2:0] FUNCT3_JALR     = 3'b000;
+	localparam logic [2:0] FUNCT3_FENCE    = 3'b000;
 	localparam logic [2:0] FUNCT3_BEQ      = 3'b000;
 	localparam logic [2:0] FUNCT3_BNE      = 3'b001;
 	localparam logic [2:0] FUNCT3_BLT      = 3'b100;
@@ -62,12 +64,19 @@ package rv32_pkg;
 	localparam logic [2:0] FUNCT3_CSRRSI   = 3'b110;
 	localparam logic [2:0] FUNCT3_CSRRCI   = 3'b111;
 
+	// Privileged funct12 encodings (OPC_SYSTEM, FUNCT3_PRIV)
+	localparam logic [11:0] FUNCT12_ECALL  = 12'h000;
+	localparam logic [11:0] FUNCT12_EBREAK = 12'h001;
+	localparam logic [11:0] FUNCT12_MRET   = 12'h302;
+
 	localparam logic [6:0] FUNCT7_BASE     = 7'b0000000; 
 	localparam logic [6:0] FUNCT7_SUB      = 7'b0100000;
     localparam logic [6:0] FUNCT7_SRA      = 7'b0100000;
 	localparam logic [6:0] FUNCT7_M_EXT    = 7'b0000001;
 
 	//CSRs
+	localparam logic [1:0]  CSR_RO_PREFIX = 2'b11;
+
 	// Unprivileged read-only counters (Zicntr)
 	localparam logic [11:0] CSR_CYCLE     = 12'hC00;
 	localparam logic [11:0] CSR_TIME      = 12'hC01;
@@ -83,8 +92,13 @@ package rv32_pkg;
 	localparam logic [11:0] CSR_MINSTRETH = 12'hB82;
 
 	// Machine information & trap setup/handling CSRs
+	localparam logic [11:0] CSR_MSTATUS   = 12'h300;
 	localparam logic [11:0] CSR_MISA      = 12'h301;
+	localparam logic [11:0] CSR_MTVEC     = 12'h305;
 	localparam logic [11:0] CSR_MSCRATCH  = 12'h340;
+	localparam logic [11:0] CSR_MEPC      = 12'h341;
+	localparam logic [11:0] CSR_MCAUSE    = 12'h342;
+	localparam logic [11:0] CSR_MTVAL     = 12'h343;
 	localparam logic [11:0] CSR_MVENDORID = 12'hF11;
 	localparam logic [11:0] CSR_MARCHID   = 12'hF12;
 	localparam logic [11:0] CSR_MIMPID    = 12'hF13;
@@ -92,6 +106,14 @@ package rv32_pkg;
 
 	// RV32IM misa value: MXL=1 (32-bit, bits [31:30]), I (bit 8), M (bit 12)
 	localparam logic [31:0] MISA_RV32IM   = 32'h4000_1100;
+
+	// Machine exception cause codes (mcause[31] == 0)
+	localparam logic [31:0] CAUSE_INST_MISALIGNED  = 32'd0;
+	localparam logic [31:0] CAUSE_ILLEGAL_INST     = 32'd2;
+	localparam logic [31:0] CAUSE_BREAKPOINT       = 32'd3;
+	localparam logic [31:0] CAUSE_LOAD_MISALIGNED  = 32'd4;
+	localparam logic [31:0] CAUSE_STORE_MISALIGNED = 32'd6;
+	localparam logic [31:0] CAUSE_ECALL_M          = 32'd11;
 
 	typedef enum logic [3:0] {
 		ALU_ADD,
@@ -107,11 +129,21 @@ package rv32_pkg;
 	} alu_op_t;
 
 	// Source for next Program Counter
-	typedef enum logic [1:0] {
+	typedef enum logic [2:0] {
 		PC_SRC_PC4, 
 		PC_SRC_BRANCH,
-		PC_SRC_ALU
+		PC_SRC_ALU,
+		PC_SRC_TRAP,
+		PC_SRC_MEPC
 	} pc_src_t;
+
+	// Source for mtval on trap entry
+	typedef enum logic [1:0] {
+		TRAP_VAL_ZERO,
+		TRAP_VAL_PC,
+		TRAP_VAL_IR,
+		TRAP_VAL_ADDR
+	} trap_val_src_t;
 
 	// Sources for ALU input A
 	typedef enum logic {
@@ -155,7 +187,9 @@ package rv32_pkg;
 		STATE_STORE,
 		STATE_LOAD_REQ,
 		STATE_LOAD_WB,
-		STATE_CSR
+		STATE_CSR,
+		STATE_TRAP,
+		STATE_MRET
 	} fsm_state_t;
 
 endpackage

@@ -24,6 +24,10 @@ module datapath #(
 	input logic mul_en,
 	input logic div_en,
 	input logic csr_en,
+	input logic trap_en,
+	input logic mret_en,
+	input logic [31:0] trap_cause,
+	input trap_val_src_t trap_val_src,
 	input logic instret_inc,
 
 	//mem interface
@@ -39,6 +43,13 @@ module datapath #(
 	output opcode_t dec_opcode,
 	output logic [2:0] dec_funct3,
 	output logic [6:0] dec_funct7,
+	output logic [11:0] dec_funct12,
+	output logic dec_rs1_zero,
+	output logic dec_rd_zero,
+	output logic csr_illegal,
+	output logic inst_misaligned,
+	output logic load_misaligned,
+	output logic store_misaligned,
 	output logic mul_done,
 	output logic div_done
 );
@@ -49,6 +60,7 @@ module datapath #(
 	logic [31:0] reg_a;
 	logic [31:0] reg_b;
 	logic [1:0] load_byte_offset;
+	logic [31:0] trap_addr_q;
 
 	//internal signals
 	logic [4:0] rs1;
@@ -57,6 +69,9 @@ module datapath #(
 	logic [31:0] imm;
 
 	logic [31:0] csr_result;
+	logic [31:0] mtvec_out;
+	logic [31:0] mepc_out;
+	logic [31:0] trap_val;
 	logic [11:0] csr_addr;
 	logic [4:0] csr_uimm;
 	logic csr_rd_zero;
@@ -78,10 +93,10 @@ module datapath #(
 	assign mem_addr = (mem_addr_src == MEM_ADDR_PC) ? pc : alu_result;
 
 	//registered instruction fields (severed from mem_rdata to eliminate STA false paths)
-	assign opcode = opcode_t'(ir[6:0]);
-	assign funct3 = ir[14:12];
-	assign funct7 = ir[31:25];
-	assign rd     = ir[11:7];
+	assign opcode  = opcode_t'(ir[6:0]);
+	assign funct3  = ir[14:12];
+	assign funct7  = ir[31:25];
+	assign rd      = ir[11:7];
 
 	//CSR instruction fields
 	assign csr_addr = ir[31:20];
@@ -91,11 +106,14 @@ module datapath #(
 
 
 	//live instruction fields (only feed regfile reads & STATE_DECODE next-state FF)
-	assign dec_opcode = opcode_t'(mem_rdata[6:0]);
-	assign dec_funct3 = mem_rdata[14:12];
-	assign dec_funct7 = mem_rdata[31:25];
-	assign rs1        = mem_rdata[19:15];
-	assign rs2        = mem_rdata[24:20];
+	assign dec_opcode   = opcode_t'(mem_rdata[6:0]);
+	assign dec_funct3   = mem_rdata[14:12];
+	assign dec_funct7   = mem_rdata[31:25];
+	assign dec_funct12  = mem_rdata[31:20];
+	assign rs1          = mem_rdata[19:15];
+	assign rs2          = mem_rdata[24:20];
+	assign dec_rs1_zero = (rs1 == 5'd0);
+	assign dec_rd_zero  = (mem_rdata[11:7] == 5'd0);
 
 	//branch handler
 	logic branch_taken;
@@ -119,6 +137,17 @@ module datapath #(
 		endcase
 	end
 
+	//address alignment checks (IALIGN = 32)
+	assign inst_misaligned = ((opcode == OPC_JAL)    && (alu_result[1:0] != 2'b00)) ||
+	                         ((opcode == OPC_BRANCH) && branch_taken && (alu_result[1:0] != 2'b00)) ||
+	                         ((opcode == OPC_JALR)   && alu_result[1]);
+
+	assign load_misaligned = ((funct3 inside {FUNCT3_LH, FUNCT3_LHU}) && alu_result[0]) ||
+	                         ((funct3 == FUNCT3_LW) && (alu_result[1:0] != 2'b00));
+
+	assign store_misaligned = ((funct3 == FUNCT3_SH) && alu_result[0]) ||
+	                          ((funct3 == FUNCT3_SW) && (alu_result[1:0] != 2'b00));
+
 	//pc handler
 	always_ff @(posedge clk) begin
 		if (rst) begin
@@ -128,6 +157,8 @@ module datapath #(
 				PC_SRC_PC4:     pc <= pc_4;
 				PC_SRC_BRANCH:  pc <= (branch_taken ? alu_result : pc_4);
 				PC_SRC_ALU:     pc <= alu_result & ~32'd1;
+				PC_SRC_TRAP:    pc <= mtvec_out;
+				PC_SRC_MEPC:    pc <= mepc_out;
 				default:        pc <= pc_4;
 			endcase
 		end
@@ -141,12 +172,16 @@ module datapath #(
 			reg_a            <= 32'd0;
 			reg_b            <= 32'd0;
 			load_byte_offset <= 2'b00;
+			trap_addr_q      <= 32'd0;
 		end else begin
 			if (pc_4_we)  pc_4  <= alu_result;
 			if (ir_we)    ir    <= mem_rdata;
 			if (a_we)     reg_a <= rf_rdata1;
 			if (b_we)     reg_b <= rf_rdata2;
 			if (fsm_state == STATE_LOAD_REQ) load_byte_offset <= alu_result[1:0];
+			if (fsm_state inside {STATE_IMM_PC, STATE_JALR, STATE_LOAD_REQ, STATE_STORE}) begin
+				trap_addr_q <= (fsm_state == STATE_JALR) ? (alu_result & ~32'd1) : alu_result;
+			end
 		end
 	end
 
@@ -272,16 +307,33 @@ module datapath #(
 		.result  (div_result)
 	);
 
+	always_comb begin
+		case (trap_val_src)
+			TRAP_VAL_PC:   trap_val = pc;
+			TRAP_VAL_IR:   trap_val = ir;
+			TRAP_VAL_ADDR: trap_val = trap_addr_q;
+			default:       trap_val = 32'd0;
+		endcase
+	end
+
 	csr_unit u_csr_unit (
-		.clk         (clk),
-		.rst         (rst),
-		.en          (csr_en),
-		.instret_inc (instret_inc),
-		.csr_addr    (csr_addr),
-		.funct3      (funct3),
-		.uimm        (csr_uimm),
-		.rd_zero     (csr_rd_zero),
-		.rs1_val     (reg_a),
-		.rdata       (csr_result)
+		.clk          (clk),
+		.rst          (rst),
+		.en           (csr_en),
+		.instret_inc  (instret_inc),
+		.csr_addr     (csr_addr),
+		.funct3       (funct3),
+		.uimm         (csr_uimm),
+		.rd_zero      (csr_rd_zero),
+		.rs1_val      (reg_a),
+		.trap_en      (trap_en),
+		.mret_en      (mret_en),
+		.trap_pc_base (pc[31:2]),
+		.trap_cause   (trap_cause),
+		.trap_val     (trap_val),
+		.rdata        (csr_result),
+		.mtvec_out    (mtvec_out),
+		.mepc_out     (mepc_out),
+		.illegal_csr  (csr_illegal)
 	);
 endmodule
