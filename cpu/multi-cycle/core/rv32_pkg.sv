@@ -65,7 +65,33 @@ package rv32_pkg;
 	localparam logic [6:0] FUNCT7_BASE     = 7'b0000000; 
 	localparam logic [6:0] FUNCT7_SUB      = 7'b0100000;
     localparam logic [6:0] FUNCT7_SRA      = 7'b0100000;
-	localparam logic [6:0] FUNCT7_M_EXT    = 7'b0000001; 
+	localparam logic [6:0] FUNCT7_M_EXT    = 7'b0000001;
+
+	//CSRs
+	// Unprivileged read-only counters (Zicntr)
+	localparam logic [11:0] CSR_CYCLE     = 12'hC00;
+	localparam logic [11:0] CSR_TIME      = 12'hC01;
+	localparam logic [11:0] CSR_INSTRET   = 12'hC02;
+	localparam logic [11:0] CSR_CYCLEH    = 12'hC80;
+	localparam logic [11:0] CSR_TIMEH     = 12'hC81;
+	localparam logic [11:0] CSR_INSTRETH  = 12'hC82;
+
+	// Machine counters (writable aliases of cycle/instret)
+	localparam logic [11:0] CSR_MCYCLE    = 12'hB00;
+	localparam logic [11:0] CSR_MINSTRET  = 12'hB02;
+	localparam logic [11:0] CSR_MCYCLEH   = 12'hB80;
+	localparam logic [11:0] CSR_MINSTRETH = 12'hB82;
+
+	// Machine information & trap setup/handling CSRs
+	localparam logic [11:0] CSR_MISA      = 12'h301;
+	localparam logic [11:0] CSR_MSCRATCH  = 12'h340;
+	localparam logic [11:0] CSR_MVENDORID = 12'hF11;
+	localparam logic [11:0] CSR_MARCHID   = 12'hF12;
+	localparam logic [11:0] CSR_MIMPID    = 12'hF13;
+	localparam logic [11:0] CSR_MHARTID   = 12'hF14;
+
+	// RV32IM misa value: MXL=1 (32-bit, bits [31:30]), I (bit 8), M (bit 12)
+	localparam logic [31:0] MISA_RV32IM   = 32'h4000_1100;
 
 	typedef enum logic [3:0] {
 		ALU_ADD,
@@ -107,7 +133,8 @@ package rv32_pkg;
 		RF_WB_DIV,   
 		RF_WB_MDR,      
 		RF_WB_PC4,
-		RF_WB_IMM
+		RF_WB_IMM,
+		RF_WB_CSR
 	} rf_wb_src_t;
 
 	// Address multiplexer to BRAM
@@ -127,7 +154,8 @@ package rv32_pkg;
 		STATE_JALR,
 		STATE_STORE,
 		STATE_LOAD_REQ,
-		STATE_LOAD_WB
+		STATE_LOAD_WB,
+		STATE_CSR
 	} fsm_state_t;
 
 endpackage

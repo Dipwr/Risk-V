@@ -28,6 +28,8 @@ module rv32_core #(
 	alu_op_t       alu_op;
 	logic          mul_en;
 	logic          div_en;
+	logic          csr_en;
+	logic          instret_inc;
 	fsm_state_t    fsm_state;
 
 	//internal fsm memory controls
@@ -79,6 +81,8 @@ module rv32_core #(
 		.mul_en       (mul_en),
 		.div_done     (div_done),
 		.div_en       (div_en),
+		.csr_en       (csr_en),
+		.instret_inc  (instret_inc),
         .fsm_state    (fsm_state)
 	);
 
@@ -103,6 +107,8 @@ module rv32_core #(
 		.alu_op       (alu_op),
 		.mul_en       (mul_en),
 		.div_en       (div_en),
+		.csr_en       (csr_en),
+		.instret_inc  (instret_inc),
 		.mem_addr     (mem_addr),
 		.mem_wdata    (mem_wdata),
 		.mem_wbe      (dp_mem_wbe),

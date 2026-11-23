@@ -87,6 +87,7 @@ if [ ! -f "$BSP_DIR/target.env" ]; then
 fi
 # shellcheck source=/dev/null
 source "$BSP_DIR/target.env"
+TARGET_MARCH="${TARGET_MARCH:-rv32im}"
 
 if [ -d "apps/$APP_ARG" ]; then
 	APP_DIR="apps/$APP_ARG"
@@ -102,6 +103,7 @@ OUT_DIR="out/$TARGET/$APP_NAME"
 
 echo "=================================================="
 echo " Target CPU:       $TARGET ($TARGET_MACRO)"
+echo " Target ISA:       $TARGET_MARCH"
 echo " Building Project: $APP_DIR"
 echo " Output Dir:       $OUT_DIR"
 echo " Toolchain:        ${PREFIX}gcc (Newlib-nano Bare-Metal)"
@@ -111,7 +113,7 @@ rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
 OBJS=()
-CFLAGS=(-march=rv32im -mabi=ilp32 -O2 "-D${TARGET_MACRO}" -Ibsp/include)
+CFLAGS=(-march=${TARGET_MARCH} -mabi=ilp32 -O2 "-D${TARGET_MACRO}" -Ibsp/include)
 
 # 1. Collect all app subdirectories as include paths (-I)
 INCLUDES=("-I$APP_DIR")
@@ -139,7 +141,7 @@ while IFS= read -r src; do
 	obj_name="$OUT_DIR/${rel_path%.S}.o"
 
 	echo "[AS] $src"
-	${PREFIX}as -march=rv32im -mabi=ilp32 "$src" -o "$obj_name"
+	${PREFIX}as -march=${TARGET_MARCH} -mabi=ilp32 "$src" -o "$obj_name"
 	OBJS+=("$obj_name")
 done < <(find "$APP_DIR" -type f -name "*.S" | sort)
 
@@ -154,12 +156,12 @@ OBJS+=("$OUT_DIR/syscalls.o")
 
 # 5. Assemble Target Boot Wrapper
 echo "[AS] $BSP_DIR/boot.s"
-${PREFIX}as -march=rv32im -mabi=ilp32 "$BSP_DIR/boot.s" -o "$OUT_DIR/boot.o"
+${PREFIX}as -march=${TARGET_MARCH} -mabi=ilp32 "$BSP_DIR/boot.s" -o "$OUT_DIR/boot.o"
 OBJS+=("$OUT_DIR/boot.o")
 
 # 6. Link Everything (-nostartfiles skips crt0.o and uses target boot.s)
 echo "[LD] Linking -> $OUT_DIR/program.elf"
-${PREFIX}gcc -march=rv32im -mabi=ilp32 -T "$BSP_DIR/linker.ld" --specs=nano.specs -nostartfiles -Wl,-m,elf32lriscv \
+${PREFIX}gcc -march=${TARGET_MARCH} -mabi=ilp32 -T "$BSP_DIR/linker.ld" --specs=nano.specs -nostartfiles -Wl,-m,elf32lriscv \
 	"${OBJS[@]}" -lc -lm -lgcc -o "$OUT_DIR/program.elf"
 
 # 7. Generate Binary & Wozmon Hex Payload

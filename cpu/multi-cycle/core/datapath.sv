@@ -23,6 +23,8 @@ module datapath #(
 	input alu_op_t alu_op,
 	input logic mul_en,
 	input logic div_en,
+	input logic csr_en,
+	input logic instret_inc,
 
 	//mem interface
 	output logic [31:0] mem_addr,
@@ -54,6 +56,11 @@ module datapath #(
 	logic [4:0] rd;
 	logic [31:0] imm;
 
+	logic [31:0] csr_result;
+	logic [11:0] csr_addr;
+	logic [4:0] csr_uimm;
+	logic csr_rd_zero;
+
 	logic [31:0] rf_rdata1;
 	logic [31:0] rf_rdata2;
 	logic [31:0] rf_wdata;
@@ -76,6 +83,13 @@ module datapath #(
 	assign funct7 = ir[31:25];
 	assign rd     = ir[11:7];
 
+	//CSR instruction fields
+	assign csr_addr = ir[31:20];
+	assign csr_uimm = ir[19:15];
+
+	assign csr_rd_zero = (rd == 5'd0);
+
+
 	//live instruction fields (only feed regfile reads & STATE_DECODE next-state FF)
 	assign dec_opcode = opcode_t'(mem_rdata[6:0]);
 	assign dec_funct3 = mem_rdata[14:12];
@@ -83,7 +97,7 @@ module datapath #(
 	assign rs1        = mem_rdata[19:15];
 	assign rs2        = mem_rdata[24:20];
 
-	//branch handler (share 3 base comparators across all 6 branch conditions)
+	//branch handler
 	logic branch_taken;
 	logic br_eq;
 	logic br_lt_s;
@@ -196,6 +210,7 @@ module datapath #(
 			RF_WB_MDR:     rf_wdata = mem_parsed_rdata;
 			RF_WB_PC4:     rf_wdata = pc_4;
 			RF_WB_IMM:     rf_wdata = imm;
+			RF_WB_CSR:     rf_wdata = csr_result;
 			default:       rf_wdata = alu_result;
 		endcase
 	end
@@ -257,4 +272,16 @@ module datapath #(
 		.result  (div_result)
 	);
 
+	csr_unit u_csr_unit (
+		.clk         (clk),
+		.rst         (rst),
+		.en          (csr_en),
+		.instret_inc (instret_inc),
+		.csr_addr    (csr_addr),
+		.funct3      (funct3),
+		.uimm        (csr_uimm),
+		.rd_zero     (csr_rd_zero),
+		.rs1_val     (reg_a),
+		.rdata       (csr_result)
+	);
 endmodule

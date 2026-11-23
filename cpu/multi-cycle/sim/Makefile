@@ -39,6 +39,7 @@ SV_SRCS := \
 	$(CORE_DIR)/alu.sv \
 	$(CORE_DIR)/bram_ram.sv \
 	$(CORE_DIR)/control_fsm.sv \
+	$(CORE_DIR)/csr_unit.sv \
 	$(CORE_DIR)/datapath.sv \
 	$(CORE_DIR)/div_unit.sv \
 	$(CORE_DIR)/imm_gen.sv \

@@ -16,15 +16,8 @@ Directory: `cpu/multi-cycle/core/`
 
 ---
 
-## 3. Pre-`Zicsr` Preparation
-
-- [ ] **3.1 Fix `OPC_SYSTEM` Immediate/CSR Address Decoding (`imm_gen.sv`)**
-  - **Files:** `imm_gen.sv:14-16`
-  - **Issue:** `OPC_SYSTEM` is grouped with I-type instructions and sign-extends `instr[31:20]`. For `Zicsr`, `instr[31:20]` is an unsigned 12-bit CSR address (`csr_addr`), while `CSRRWI`/`CSRRSI`/`CSRRCI` use the 5-bit zero-extended immediate `{27'b0, instr[19:15]}` (`zimm`).
+## 2. Trap & Exception Preparation
 
 - [ ] **3.2 Tighten Illegal-Instruction & Misaligned-Target Decode (`control_fsm.sv`, `datapath.sv`)**
   - **Files:** `control_fsm.sv:51-70`, `control_fsm.sv:175-197`, `datapath.sv:102-103`
   - **Issue:** Decode currently accepts arbitrary `funct7` values on `OPC_OP` and `OPC_OP_IMM` shifts, arbitrary `funct3` values on `OPC_BRANCH`/`OPC_LOAD`/`OPC_STORE`, and ignores `target[1] == 1` on `JAL`/`JALR`/taken `BRANCH` (Instruction Address Misaligned without `C` extension). Tighten decode validation in `STATE_DECODE` if implementing `mcause`/exception traps with `Zicsr`.
-
-- [ ] **3.3 Implement `Zicsr` Zero-Register Side-Effect Suppression Rules**
-  - **Goal:** Ensure `CSRRW`/`CSRRWI` with `rd == x0` suppresses CSR read side effects, and `CSRRS`/`CSRRC`/`CSRRSI`/`CSRRCI` with `rs1 == x0` / `zimm == 0` suppresses CSR writes (essential so reading read-only CSRs like `mcycle`/`minstret` via `csrrs rd, csr, x0` does not raise an illegal-instruction trap).

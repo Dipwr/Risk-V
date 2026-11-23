@@ -7,7 +7,7 @@ A custom **RISC-V (RV32IM)** processor implementation developed from fundamental
 ## 📌 Project Overview & Goals
 
 The primary goal of **Risk-V** is to build a complete, self-contained RISC-V computing system from scratch:
-1. **Instruction Set Architecture**: Full compliance with the unprivileged **RV32I** Base Integer ISA and the **RV32M** Standard Extension for Integer Multiplication and Division.
+1. **Instruction Set Architecture**: Full compliance with the unprivileged **RV32I** Base Integer ISA, the **RV32M** Standard Extension for Integer Multiplication and Division, and **`Zicsr` / `Zicntr`** CSR & hardware performance counter support in Phase 2.
 2. **Four-Phase Evolutionary Roadmap**:
    - **Phase 1 (Single-Cycle & Simulation Platform)**: Educational schematic capture in [Digital](https://github.com/hneemann/Digital), Verilog export, and high-performance cycle-accurate simulation in **Verilator + SDL2** with a rich bare-metal software ecosystem.
    - **Phase 2 (Multi-Cycle Synthesizable Core & FPGA SoC)**: Modular **SystemVerilog** rewrite optimized for physical FPGA hardware (**Digilent Arty A7-100T**), featuring hardware BRAM, dual-port VRAM, tear-free hardware VGA pixel generation (1280x800 @ 60 Hz with 4x hardware upscaling and selectable VSync), pipelined DSP48E1 multiply / sequential divide units, a FIFO-buffered UART controller, and a cross-platform Verilator + SDL2 + PTY simulator (`cpu/multi-cycle/sim/`).
@@ -104,17 +104,17 @@ The multi-cycle core (`rv32_core.sv`) decouples control (`control_fsm.sv`) from 
         |                     +-------------------+
         |                     |   STATE_DECODE    |
         |                     +-------------------+
-        |        /      /      /      |       \       \         \
-        |       v      v      v       v        v       v         v
-        |  +--------+ +----+ +-----+ +-------+ +----+ +-----+ +--------------+
-        |  |STATE_  | |EX  | |STATE| |STATE_ | |JALR| |STORE| |STATE_LOAD_REQ|
-        |  |IMM_PC  | |    | |_MUL | |DIV    | |    | |     | +--------------+
-        |  +--------+ +----+ +-----+ +-------+ +----+ +-----+        |
-        |      |        |     (5 cyc) (2/34c)    |       |           v
-        |      |        |       |        |       |       |    +--------------+
-        |      |        |       |        |       |       |    |STATE_LOAD_WB |
-        |      |        |       |        |       |       |    +--------------+
-        |      \________|_______|________|_______|_______|___________/
+        |       /      /     /     |       \      \       \          \
+        |      v      v     v      v        v      v       v          v
+        | +--------+ +---+ +---+ +-----+ +-----+ +----+ +-----+ +--------------+
+        | |STATE_  | |EX | |CSR| |STATE| |STATE| |JALR| |STORE| |STATE_LOAD_REQ|
+        | |IMM_PC  | |   | |   | |_MUL | |_DIV | |    | |     | +--------------+
+        | +--------+ +---+ +---+ +-----+ +-----+ +----+ +-----+        |
+        |     |        |     |   (5 cyc) (2/34c)   |       |           v
+        |     |        |     |     |       |       |       |    +--------------+
+        |     |        |     |     |       |       |       |    |STATE_LOAD_WB |
+        |     |        |     |     |       |       |       |    +--------------+
+        |     \________|_____|_____|_______|_______|_______|___________/
         +--------------------------------+
 ```
 
@@ -122,6 +122,7 @@ The multi-cycle core (`rv32_core.sv`) decouples control (`control_fsm.sv`) from 
 - **Instruction Decode & Register Fetch (`STATE_DECODE`)**: Latches `ir <= mem_rdata`, reads `regfile` (`RAM32M`, no runtime reset) into `reg_a`/`reg_b`, computes `pc_4 = pc + 4` via `u_alu`, and selects the next FSM state from live `dec_opcode`/`dec_funct3`/`dec_funct7`.
 - **PC-Relative / Upper-Immediate / Branch (`STATE_IMM_PC`)**: Completes `BRANCH` (using 3 shared base comparators for `BEQ`/`BNE`/`BLT`/`BGE`/`BLTU`/`BGEU`), `JAL`, `LUI`, `AUIPC`, and unimplemented/NOP opcodes.
 - **Execute (`STATE_EXECUTE`)**: Single-cycle RV32I ALU operations (`alu.sv`, 10 ops).
+- **CSR Access (`STATE_CSR`)**: Dedicated `csr_unit.sv` — single-cycle atomic RMW execution (`CSRRW`/`CSRRS`/`CSRRC`/`CSRRWI`/`CSRRSI`/`CSRRCI`, 3 cycles total) with `rd == x0` / `rs1 == x0` / `zimm == 0` side-effect suppression, 64-bit `cycle`/`time`/`instret` counters (`0xC00`–`0xC82`), writable `mcycle`/`minstret` aliases (`0xB00`–`0xB82`), `mscratch` (`0x340`), and hardwired `misa`/`mvendorid`/`marchid`/`mimpid`/`mhartid`.
 - **Multiply (`STATE_MUL`)**: Dedicated `mul_unit.sv` — 4-stage `en`-gated `DSP48E1` pipeline (`a_ext_q`/`b_ext_q` + `s1..s3_prod`), completing `MUL`/`MULH`/`MULHSU`/`MULHU` in 5 cycles in `STATE_MUL` (7 cycles total).
 - **Divide (`STATE_DIV`)**: Dedicated `div_unit.sv` — 32-step restoring binary divider with a shared post-negator and 2-cycle fast-paths for divide-by-zero and signed `-2^31 / -1` overflow (34 cycles normal in `STATE_DIV`).
 - **Memory Access (`STATE_STORE`, `STATE_LOAD_REQ` -> `STATE_LOAD_WB`)**: Single-cycle request for stores, two-cycle request/writeback for loads to match synchronous BRAM read latency.
@@ -138,7 +139,7 @@ Ported to RV32I assembly (`Programs/bootloaders/multi_cycle/visual_wozmon320x200
 - Execute user programs: `<addr> R` (e.g. `10000 R`).
 
 ### 2. Multi-Target BSP & Bare-Metal C Toolchain
-- **Compiler**: Standard RISC-V GCC toolchain (`riscv-none-elf-gcc`, `riscv64-unknown-elf-gcc`, etc.) with flags `-march=rv32im -mabi=ilp32 -O2`.
+- **Compiler**: Standard RISC-V GCC toolchain (`riscv-none-elf-gcc`, `riscv64-unknown-elf-gcc`, etc.) with `-mabi=ilp32 -O2` and per-target `-march` configured via `TARGET_MARCH` in `Programs/bsp/<target>/target.env` (`rv32im_zicsr_zicntr` for `multi_cycle`, `rv32im` for `single_cycle`).
 - **Target BSPs (`Programs/bsp/`)**:
   - `bsp/include/bsp.h`: Unified HAL API (`bsp_vram_page`, `bsp_set_page`, `bsp_set_vsync`, `bsp_vblank`, `bsp_active_page`, `bsp_wait_vblank`, `bsp_present_page`, `bsp_putc`, `bsp_puts`, `bsp_key_avail`, `bsp_getc`, `bsp_try_getc`, `bsp_exit`) abstracting memory maps, VRAM page strides (`64000` vs `65536` pixels), VSync/active-page handoff, and console/UART I/O.
   - `bsp/single_cycle/`: Phase 1 target (`0x0004_0000` RAM, `0x0008_2000` VRAM, `TERM_OUT`/`KEY_*` MMIO, Wozmon load `40000`).
@@ -173,12 +174,13 @@ Risk-V/
 │   │   ├── digital/               # Digital logic schematics (.dig files)
 │   │   └── verilog/               # Verilog export & Verilator SDL2 testbench
 │   └── multi-cycle/               # Phase 2: Multi-Cycle FPGA Core
-│       ├── TODO.md                # Active architectural, timing & Zicsr backlog
+│       ├── TODO.md                # Active architectural, timing & trap backlog
 │       ├── core/                  # SystemVerilog RTL implementation
-│       │   ├── rv32_pkg.sv        # Package with opcodes, funct3/7, ALU & FSM types
+│       │   ├── rv32_pkg.sv        # Package with opcodes, funct3/7, CSRs, ALU & FSM types
 │       │   ├── rv32_core.sv       # CPU core top (links FSM & Datapath)
 │       │   ├── control_fsm.sv     # Multi-cycle control state machine
-│       │   ├── datapath.sv        # Register file, ALU/MUL/DIV, imm gen, PC logic
+│       │   ├── csr_unit.sv        # Zicsr unit, 64-bit cycle/instret counters & M-mode info CSRs
+│       │   ├── datapath.sv        # Register file, ALU/MUL/DIV/CSR, imm gen, PC logic
 │       │   ├── regfile.sv         # 32 x 32-bit LUTRAM-inferred register file
 │       │   ├── alu.sv             # RV32I 10-op combinational ALU
 │       │   ├── mul_unit.sv        # 4-stage en-gated DSP48E1 RV32M multiplier
@@ -262,7 +264,7 @@ Key simulator features:
 ### 4. Synthesizing Phase 2 for Digilent Arty A7-100T
 1. Open Xilinx Vivado (2020.2 or newer recommended).
 2. Create an RTL project targeting `xc7a100tcsg324-1`.
-3. Add all SystemVerilog files from `cpu/multi-cycle/core/` (including `mul_unit.sv` and `div_unit.sv`).
+3. Add all SystemVerilog files from `cpu/multi-cycle/core/` (including `mul_unit.sv`, `div_unit.sv`, and `csr_unit.sv`).
 4. Configure a **Clocking Wizard** IP instance named `clk_wiz_0`:
    - Input: 100 MHz oscillator (`CLK100MHZ`, pin E3).
    - Output 1 (`clk_cpu`): 25.0 MHz (or higher — update `CPU_CLK_FREQ` parameter on `arty_a7_top` to match).
@@ -292,9 +294,10 @@ Key simulator features:
   - [x] Top-level Arty A7-100T wrapper (`arty_a7_top.sv`) with per-domain reset synchronizers and synchronous resets across all RTL.
   - [x] Cross-platform (Linux & macOS) Verilator + SDL2 + PTY simulator (`cpu/multi-cycle/sim/`) targeting `arty_a7_top.sv` with Fast & Pin-Accurate VGA modes and PGO support.
   - [x] Target BSP/HAL refactoring (`Programs/bsp/`) unifying `single_cycle` and `multi_cycle` across all C apps.
+  - [x] `Zicsr` CSR instructions & `Zicntr`/M-mode counter & info CSRs (`csr_unit.sv`, `STATE_CSR`).
   - [ ] Vivado bitstream synthesis & timing closure (including post-synthesis evaluation of deferred `ALUOut`/`mem_addr` bypass in `TODO.md`).
   - [ ] Physical hardware bring-up and verification on Arty A7-100T silicon.
-  - [ ] `Zicsr` extension & trap/exception support (`TODO.md` Section 3), followed by future OS/kernel experiments.
+  - [ ] Trap/exception & M-mode privilege support (`TODO.md` 3.2: illegal-instruction/misaligned decode, `mtvec`/`mepc`/`mcause`/`mstatus`, `ECALL`/`EBREAK`/`MRET`), followed by future OS/kernel experiments.
   - [ ] Fast binary UART bootloader / interactive C BIOS shell & QSPI flash / SD card persistent storage.
 - [ ] **Phase 3: RV32IM 5-Stage Pipelined Core**
   - [ ] Pipeline stage registers (`IF/ID`, `ID/EX`, `EX/MEM`, `MEM/WB` register slices).

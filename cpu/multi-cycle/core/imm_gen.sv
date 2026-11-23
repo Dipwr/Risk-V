@@ -11,7 +11,7 @@ module imm_gen (
 	always_comb begin
 		case (opcode)
 			// I-type: Arithmetic with immediate, Loads, JALR
-			OPC_OP_IMM, OPC_LOAD, OPC_JALR, OPC_SYSTEM: begin
+			OPC_OP_IMM, OPC_LOAD, OPC_JALR: begin
 				imm = { {20{instr[31]}}, instr[31:20] };
 			end
 

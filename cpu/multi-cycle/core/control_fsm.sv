@@ -42,6 +42,10 @@ module control_fsm (
     input  logic div_done,
     output logic div_en,
 
+    //outputs to csr
+    output logic csr_en,
+    output logic instret_inc,
+
     output fsm_state_t fsm_state
 );
     always_ff @(posedge clk) begin
@@ -71,6 +75,16 @@ module control_fsm (
                         OPC_JALR: fsm_state <= STATE_JALR;
                         OPC_STORE: fsm_state <= STATE_STORE;
                         OPC_LOAD: fsm_state <= STATE_LOAD_REQ;
+                        OPC_SYSTEM: begin
+                            if (dec_funct3 inside {
+                                FUNCT3_CSRRW,  FUNCT3_CSRRS,  FUNCT3_CSRRC,
+                                FUNCT3_CSRRWI, FUNCT3_CSRRSI, FUNCT3_CSRRCI
+                            }) begin
+                                fsm_state <= STATE_CSR;
+                            end else begin
+                                fsm_state <= STATE_IMM_PC;
+                            end
+                        end
                         default: fsm_state <= STATE_IMM_PC;
                     endcase
                 end
@@ -90,6 +104,8 @@ module control_fsm (
                 STATE_LOAD_REQ: fsm_state <= STATE_LOAD_WB;
 
                 STATE_LOAD_WB: fsm_state <= STATE_FETCH;
+
+                STATE_CSR: fsm_state <= STATE_FETCH;
 
                 default: fsm_state <= STATE_FETCH;
             endcase 
@@ -113,6 +129,8 @@ module control_fsm (
 		alu_op       = ALU_ADD;
 		mul_en       = 1'b0;
 		div_en       = 1'b0;
+		csr_en       = 1'b0;
+		instret_inc  = 1'b0;
 
         case (fsm_state)
             STATE_RESET: begin
@@ -135,6 +153,7 @@ module control_fsm (
             STATE_IMM_PC: begin
                 alu_src_a = ALU_SRC_A_PC;
                 alu_src_b = ALU_SRC_B_IMM;
+                instret_inc = 1'b1;
                 case (opcode)
                     OPC_BRANCH:begin
                         pc_we = 1'b1;
@@ -170,6 +189,7 @@ module control_fsm (
                 rf_wb_src = RF_WB_ALUOUT;
                 pc_we = 1'b1;
                 pc_src = PC_SRC_PC4;
+                instret_inc = 1'b1;
 
                 if (opcode == OPC_OP_IMM) begin
                     alu_src_b = ALU_SRC_B_IMM;
@@ -206,20 +226,22 @@ module control_fsm (
             STATE_MUL: begin
                 mul_en = 1'b1;
                 if (mul_done) begin
-                    reg_we    = 1'b1;
-                    rf_wb_src = RF_WB_MUL;
-                    pc_we     = 1'b1;
-                    pc_src    = PC_SRC_PC4;
+                    reg_we      = 1'b1;
+                    rf_wb_src   = RF_WB_MUL;
+                    pc_we       = 1'b1;
+                    pc_src      = PC_SRC_PC4;
+                    instret_inc = 1'b1;
                 end
             end
 
             STATE_DIV: begin
                 div_en = 1'b1;
                 if (div_done) begin
-                    reg_we    = 1'b1;
-                    rf_wb_src = RF_WB_DIV;
-                    pc_we     = 1'b1;
-                    pc_src    = PC_SRC_PC4;
+                    reg_we      = 1'b1;
+                    rf_wb_src   = RF_WB_DIV;
+                    pc_we       = 1'b1;
+                    pc_src      = PC_SRC_PC4;
+                    instret_inc = 1'b1;
                 end
             end
 
@@ -230,6 +252,7 @@ module control_fsm (
                 pc_src = PC_SRC_ALU;
                 reg_we = 1'b1;
                 rf_wb_src = RF_WB_PC4;
+                instret_inc = 1'b1;
             end
 
             STATE_STORE: begin
@@ -240,6 +263,7 @@ module control_fsm (
                 mem_addr_src = MEM_ADDR_ALU;
                 pc_we = 1'b1;
                 pc_src = PC_SRC_PC4;
+                instret_inc = 1'b1;
             end
 
             STATE_LOAD_REQ: begin
@@ -254,6 +278,16 @@ module control_fsm (
                 rf_wb_src = RF_WB_MDR;
                 pc_we = 1'b1;
                 pc_src = PC_SRC_PC4;
+                instret_inc = 1'b1;
+            end
+
+            STATE_CSR: begin
+                csr_en      = 1'b1;
+                reg_we      = 1'b1;
+                rf_wb_src   = RF_WB_CSR;
+                pc_we       = 1'b1;
+                pc_src      = PC_SRC_PC4;
+                instret_inc = 1'b1;
             end
 
             default: ;
