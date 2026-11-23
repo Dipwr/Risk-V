@@ -4,6 +4,7 @@
 
 # Build & simulation artifacts
 Programs/out/
+Programs/riscv-tests/
 **/__pycache__/
 *.pyc
 cpu/single-cycle/verilog/obj_dir/
