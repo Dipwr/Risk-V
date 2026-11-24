@@ -83,6 +83,8 @@ module datapath #(
 	logic [31:0] alu_in_a;
 	logic [31:0] alu_in_b;
 	logic [31:0] alu_result;
+	logic [31:0] mem_imm;
+	logic [31:0] eff_addr;
 	logic [31:0] mul_result;
 	logic [31:0] div_result;
 
@@ -90,7 +92,11 @@ module datapath #(
 	logic [31:0] mem_unparsed_wdata;
 	assign mem_unparsed_wdata = reg_b;
 
-	assign mem_addr = (mem_addr_src == MEM_ADDR_PC) ? pc : alu_result;
+	// dedicated load/store address adder bypassing imm_gen + alu muxes (0-cycle)
+	assign mem_imm  = {{20{ir[31]}}, ir[31:25], (opcode == OPC_STORE) ? ir[11:7] : ir[24:20]};
+	assign eff_addr = reg_a + mem_imm;
+
+	assign mem_addr = (mem_addr_src == MEM_ADDR_PC) ? pc : eff_addr;
 
 	//registered instruction fields (severed from mem_rdata to eliminate STA false paths)
 	assign opcode  = opcode_t'(ir[6:0]);
@@ -142,11 +148,11 @@ module datapath #(
 	                         ((opcode == OPC_BRANCH) && branch_taken && (alu_result[1:0] != 2'b00)) ||
 	                         ((opcode == OPC_JALR)   && alu_result[1]);
 
-	assign load_misaligned = ((funct3 inside {FUNCT3_LH, FUNCT3_LHU}) && alu_result[0]) ||
-	                         ((funct3 == FUNCT3_LW) && (alu_result[1:0] != 2'b00));
+	assign load_misaligned = ((funct3 inside {FUNCT3_LH, FUNCT3_LHU}) && eff_addr[0]) ||
+	                         ((funct3 == FUNCT3_LW) && (eff_addr[1:0] != 2'b00));
 
-	assign store_misaligned = ((funct3 == FUNCT3_SH) && alu_result[0]) ||
-	                          ((funct3 == FUNCT3_SW) && (alu_result[1:0] != 2'b00));
+	assign store_misaligned = ((funct3 == FUNCT3_SH) && eff_addr[0]) ||
+	                          ((funct3 == FUNCT3_SW) && (eff_addr[1:0] != 2'b00));
 
 	//pc handler
 	always_ff @(posedge clk) begin
@@ -178,9 +184,13 @@ module datapath #(
 			if (ir_we)    ir    <= mem_rdata;
 			if (a_we)     reg_a <= rf_rdata1;
 			if (b_we)     reg_b <= rf_rdata2;
-			if (fsm_state == STATE_LOAD_REQ) load_byte_offset <= alu_result[1:0];
+			if (fsm_state == STATE_LOAD_REQ) load_byte_offset <= eff_addr[1:0];
 			if (fsm_state inside {STATE_IMM_PC, STATE_JALR, STATE_LOAD_REQ, STATE_STORE}) begin
-				trap_addr_q <= (fsm_state == STATE_JALR) ? (alu_result & ~32'd1) : alu_result;
+				if (fsm_state inside {STATE_LOAD_REQ, STATE_STORE}) begin
+					trap_addr_q <= eff_addr;
+				end else begin
+					trap_addr_q <= (fsm_state == STATE_JALR) ? (alu_result & ~32'd1) : alu_result;
+				end
 			end
 		end
 	end
@@ -221,11 +231,11 @@ module datapath #(
 			case (funct3)
 				FUNCT3_SB: begin
 					mem_wdata = {4{mem_unparsed_wdata[7:0]}};
-					mem_wbe   = 4'b0001 << mem_addr[1:0];
+					mem_wbe   = 4'b0001 << eff_addr[1:0];
 				end
 				FUNCT3_SH: begin
 					mem_wdata = {2{mem_unparsed_wdata[15:0]}};
-					mem_wbe   = mem_addr[1] ? 4'b1100 : 4'b0011;
+					mem_wbe   = eff_addr[1] ? 4'b1100 : 4'b0011;
 				end
 				FUNCT3_SW: begin
 					mem_wdata = mem_unparsed_wdata;

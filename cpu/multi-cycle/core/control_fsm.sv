@@ -407,8 +407,6 @@ module control_fsm (
             end
 
             STATE_STORE: begin
-                alu_src_b    = ALU_SRC_B_IMM;
-                alu_op       = ALU_ADD;
                 mem_req      = !store_misaligned;
                 mem_we       = !store_misaligned;
                 mem_addr_src = MEM_ADDR_ALU;
@@ -418,8 +416,6 @@ module control_fsm (
             end
 
             STATE_LOAD_REQ: begin
-                alu_src_b    = ALU_SRC_B_IMM;
-                alu_op       = ALU_ADD;
                 mem_req      = !load_misaligned;
                 mem_addr_src = MEM_ADDR_ALU;
             end

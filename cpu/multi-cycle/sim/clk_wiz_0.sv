@@ -1,14 +1,12 @@
-// Behavioral Clocking Wizard stub for Verilator simulation of arty_a7_top.
-// sim_clk_cpu and sim_clk_vga are driven directly from sim_main.cpp via sim.vlt.
+// Behavioral CPU Clocking Wizard stub for Verilator simulation of arty_a7_top.
+// sim_clk_cpu is driven directly from sim_main.cpp via sim.vlt.
 module clk_wiz_0 (
 	input  logic clk_in1,
 	output logic clk_out1,
-	output logic clk_out2,
 	input  logic reset,
 	output logic locked
 );
 	logic sim_clk_cpu = 1'b0;
-	logic sim_clk_vga = 1'b0;
 
 	logic [2:0] lock_cnt = 3'd0;
 
@@ -25,6 +23,5 @@ module clk_wiz_0 (
 	end
 
 	assign clk_out1 = sim_clk_cpu;
-	assign clk_out2 = sim_clk_vga;
 
 endmodule

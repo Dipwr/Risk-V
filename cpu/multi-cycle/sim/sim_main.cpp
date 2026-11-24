@@ -690,9 +690,9 @@ bool load_bin_into_ram(Varty_a7_top *top, const std::string &path,
 void pulse_vga_cycles(Varty_a7_top *top, int count) {
 	auto *root = top->rootp;
 	for (int i = 0; i < count; ++i) {
-		root->arty_a7_top__DOT__u_clk_wiz__DOT__sim_clk_vga = 1;
+		root->arty_a7_top__DOT__u_clk_wiz_vga__DOT__sim_clk_vga = 1;
 		top->eval();
-		root->arty_a7_top__DOT__u_clk_wiz__DOT__sim_clk_vga = 0;
+		root->arty_a7_top__DOT__u_clk_wiz_vga__DOT__sim_clk_vga = 0;
 		top->eval();
 	}
 }
@@ -705,20 +705,20 @@ void do_board_reset(Varty_a7_top *top, UartBridge &uart, VgaMonitor &vga_mon) {
 	top->uart_rx_pin = 1;
 	top->btn_rst = 1;
 	top->CLK100MHZ = 0;
-	root->arty_a7_top__DOT__u_clk_wiz__DOT__sim_clk_cpu = 0;
-	root->arty_a7_top__DOT__u_clk_wiz__DOT__sim_clk_vga = 0;
+	root->arty_a7_top__DOT__u_clk_wiz_cpu__DOT__sim_clk_cpu = 0;
+	root->arty_a7_top__DOT__u_clk_wiz_vga__DOT__sim_clk_vga = 0;
 	top->eval();
 
-	// Clock CLK100MHZ enough cycles for clk_wiz_0 to lock, while pulsing CPU/VGA clocks
+	// Clock CLK100MHZ enough cycles for clk_wiz_0 and clk_wiz_1 to lock, while pulsing CPU/VGA clocks
 	for (int i = 0; i < 16; ++i) {
 		top->CLK100MHZ = 1;
-		root->arty_a7_top__DOT__u_clk_wiz__DOT__sim_clk_cpu = 1;
-		root->arty_a7_top__DOT__u_clk_wiz__DOT__sim_clk_vga = 1;
+		root->arty_a7_top__DOT__u_clk_wiz_cpu__DOT__sim_clk_cpu = 1;
+		root->arty_a7_top__DOT__u_clk_wiz_vga__DOT__sim_clk_vga = 1;
 		top->eval();
 
 		top->CLK100MHZ = 0;
-		root->arty_a7_top__DOT__u_clk_wiz__DOT__sim_clk_cpu = 0;
-		root->arty_a7_top__DOT__u_clk_wiz__DOT__sim_clk_vga = 0;
+		root->arty_a7_top__DOT__u_clk_wiz_cpu__DOT__sim_clk_cpu = 0;
+		root->arty_a7_top__DOT__u_clk_wiz_vga__DOT__sim_clk_vga = 0;
 		top->eval();
 	}
 
@@ -726,13 +726,13 @@ void do_board_reset(Varty_a7_top *top, UartBridge &uart, VgaMonitor &vga_mon) {
 	top->btn_rst = 0;
 	for (int i = 0; i < 8; ++i) {
 		top->CLK100MHZ = 1;
-		root->arty_a7_top__DOT__u_clk_wiz__DOT__sim_clk_cpu = 1;
-		root->arty_a7_top__DOT__u_clk_wiz__DOT__sim_clk_vga = 1;
+		root->arty_a7_top__DOT__u_clk_wiz_cpu__DOT__sim_clk_cpu = 1;
+		root->arty_a7_top__DOT__u_clk_wiz_vga__DOT__sim_clk_vga = 1;
 		top->eval();
 
 		top->CLK100MHZ = 0;
-		root->arty_a7_top__DOT__u_clk_wiz__DOT__sim_clk_cpu = 0;
-		root->arty_a7_top__DOT__u_clk_wiz__DOT__sim_clk_vga = 0;
+		root->arty_a7_top__DOT__u_clk_wiz_cpu__DOT__sim_clk_cpu = 0;
+		root->arty_a7_top__DOT__u_clk_wiz_vga__DOT__sim_clk_vga = 0;
 		top->eval();
 	}
 }
@@ -834,7 +834,7 @@ void cpu_simulation_worker(int argc, char **argv, const SimConfig &cfg,
 				}
 
 				// Rising edge of clk_cpu
-				root->arty_a7_top__DOT__u_clk_wiz__DOT__sim_clk_cpu = 1;
+				root->arty_a7_top__DOT__u_clk_wiz_cpu__DOT__sim_clk_cpu = 1;
 				top->eval_step();
 
 				// Step bit-accurate UART only when active or RX data pending
@@ -845,7 +845,7 @@ void cpu_simulation_worker(int argc, char **argv, const SimConfig &cfg,
 				}
 
 				// Falling edge of clk_cpu
-				root->arty_a7_top__DOT__u_clk_wiz__DOT__sim_clk_cpu = 0;
+				root->arty_a7_top__DOT__u_clk_wiz_cpu__DOT__sim_clk_cpu = 0;
 				top->eval_step();
 
 				// When VSync is disabled, immediately propagate page flips into clk_vga
@@ -893,13 +893,13 @@ void cpu_simulation_worker(int argc, char **argv, const SimConfig &cfg,
 				if (next_cpu_edge_ps == next_ps) {
 					clk_cpu_val ^= 1U;
 					cpu_rising = (clk_cpu_val == 1U);
-					root->arty_a7_top__DOT__u_clk_wiz__DOT__sim_clk_cpu = clk_cpu_val;
+					root->arty_a7_top__DOT__u_clk_wiz_cpu__DOT__sim_clk_cpu = clk_cpu_val;
 					next_cpu_edge_ps += CPU_HALF_PS;
 				}
 				if (next_vga_edge_ps == next_ps) {
 					clk_vga_val ^= 1U;
 					vga_rising = (clk_vga_val == 1U);
-					root->arty_a7_top__DOT__u_clk_wiz__DOT__sim_clk_vga = clk_vga_val;
+					root->arty_a7_top__DOT__u_clk_wiz_vga__DOT__sim_clk_vga = clk_vga_val;
 					next_vga_edge_ps += VGA_HALF_PS;
 				}
 

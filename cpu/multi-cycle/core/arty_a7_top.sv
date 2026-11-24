@@ -1,7 +1,7 @@
 module arty_a7_top #(
 	parameter string       BOOT_HEX     = "boot.mem",
 	parameter logic [31:0] RESET_PC     = 32'h0000_0000,
-	parameter int          CPU_CLK_FREQ = 25_000_000,
+	parameter int          CPU_CLK_FREQ = 84_000_000,
 	parameter int          UART_BAUD    = 115_200
 )(
 	input  logic       CLK100MHZ,    // pin E3 (100 mhz crystal oscillator)
@@ -18,19 +18,29 @@ module arty_a7_top #(
 	input  logic       uart_rx_pin,  // pin A9  (PC TX -> FPGA RX)
 	output logic       uart_tx_pin   // pin D10 (FPGA TX -> PC RX)
 );
-	//clock wizard outputs
+	//clock wizard outputs (separate CPU and VGA MMCM/PLL instances)
 	logic clk_cpu;
 	logic clk_vga;
+	logic clk_cpu_locked;
+	logic clk_vga_locked;
 	logic clk_locked;
 
-	//keep MMCM running continuously so BTN0 never stops or glitches clocks
-	clk_wiz_0 u_clk_wiz (
+	//keep clock wizards running continuously so BTN0 never stops or glitches clocks
+	clk_wiz_0 u_clk_wiz_cpu (
 		.clk_in1  (CLK100MHZ),
-		.clk_out1 (clk_cpu),     // 25 mhz cpu clock
-		.clk_out2 (clk_vga),     // 83.46 mhz pixel clock
+		.clk_out1 (clk_cpu),     // cpu clock (matches CPU_CLK_FREQ)
 		.reset    (1'b0),
-		.locked   (clk_locked)
+		.locked   (clk_cpu_locked)
 	);
+
+	clk_wiz_1 u_clk_wiz_vga (
+		.clk_in1  (CLK100MHZ),
+		.clk_out1 (clk_vga),     // 83.46 mhz pixel clock
+		.reset    (1'b0),
+		.locked   (clk_vga_locked)
+	);
+
+	assign clk_locked = clk_cpu_locked && clk_vga_locked;
 
 	//raw async reset asserted on BTN0 press or while pll is unlocked
 	logic async_rst;

@@ -2,7 +2,7 @@
 
 // Expose clock wizard outputs so sim_main.cpp drives exact clk_cpu / clk_vga phases
 public_flat_rw -module "clk_wiz_0" -var "sim_clk_cpu"
-public_flat_rw -module "clk_wiz_0" -var "sim_clk_vga"
+public_flat_rw -module "clk_wiz_1" -var "sim_clk_vga"
 
 // Expose RAM for optional --boot / --load preloading without touching core RTL
 public_flat_rw -module "bram_ram" -var "mem"

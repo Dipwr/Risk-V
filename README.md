@@ -54,9 +54,9 @@ The primary goal of **Risk-V** is to build a complete, self-contained RISC-V com
 - **Target Hardware**: Digilent Arty A7-100T (Xilinx Artix-7 `XC7A100T`, 135 BRAMs — required for 512 KB total on-chip RAM + VRAM).
 - **Core RTL**: Written in modular SystemVerilog (`cpu/multi-cycle/core/`) using synchronous resets across all sequential logic for Xilinx 7-series primitive packing (`DSP48E1`, `RAMB36E1`, `RAM32M`/`RAM64M`).
 - **Clock Domains & Reset Architecture**:
-  - `clk_cpu` (parameterized `CPU_CLK_FREQ`, default `25 MHz`): Core logic, BRAM, UART, MMIO.
-  - `clk_vga` (`83.46 MHz`): VESA 1280x800 @ 60 Hz CVT pixel clock.
-  - Generated via Xilinx Clocking Wizard (`clk_wiz_0`) from the onboard 100 MHz oscillator (`CLK100MHZ`), kept continuously running (`.reset(1'b0)`) so `BTN0` never stops or glitches clocks.
+  - `clk_cpu` (parameterized `CPU_CLK_FREQ`, default `60 MHz`): Core logic, BRAM, UART, MMIO, generated via Xilinx Clocking Wizard (`clk_wiz_0`, PLL).
+  - `clk_vga` (`83.46 MHz`): VESA 1280x800 @ 60 Hz CVT pixel clock, generated via a separate Xilinx Clocking Wizard (`clk_wiz_1`, MMCM) so CPU frequency scaling does not alter VGA timing.
+  - Both clock wizards are fed from the onboard 100 MHz oscillator (`CLK100MHZ`) and kept continuously running (`.reset(1'b0)`) so `BTN0` never stops or glitches clocks; `clk_locked` combines `clk_cpu_locked && clk_vga_locked`.
   - Per-domain async-assert / sync-deassert reset synchronizers (`rst_cpu`, `rst_vga`) in `arty_a7_top.sv` driven by `btn_rst || !clk_locked`.
 - **Memory & Video Subsystem**:
   - **Main RAM** (`bram_ram.sv`): 256 KB Block RAM initialized with boot payload (`BOOT_HEX`, default `"boot.mem"`).
@@ -128,7 +128,7 @@ The multi-cycle core (`rv32_core.sv`) decouples control (`control_fsm.sv`) from 
 - **Trap & Return (`STATE_TRAP`, `STATE_MRET`)**: Synchronous M-mode exception handling for `ECALL`, `EBREAK`, illegal instructions/CSRs, and misaligned instruction/load/store addresses (suppressing side effects and `instret`), plus `MRET` state restoration (`MIE <= MPIE`, `pc <= mepc`).
 - **Multiply (`STATE_MUL`)**: Dedicated `mul_unit.sv` — 4-stage `en`-gated `DSP48E1` pipeline (`a_ext_q`/`b_ext_q` + `s1..s3_prod`), completing `MUL`/`MULH`/`MULHSU`/`MULHU` in 5 cycles in `STATE_MUL` (7 cycles total).
 - **Divide (`STATE_DIV`)**: Dedicated `div_unit.sv` — 32-step restoring binary divider with a shared post-negator and 2-cycle fast-paths for divide-by-zero and signed `-2^31 / -1` overflow (34 cycles normal in `STATE_DIV`).
-- **Memory Access (`STATE_STORE`, `STATE_LOAD_REQ` -> `STATE_LOAD_WB`)**: Single-cycle request for stores, two-cycle request/writeback for loads to match synchronous BRAM read latency, with misaligned halfword/word address detection and `mem_req`/`mem_we` suppression.
+- **Memory Access (`STATE_STORE`, `STATE_LOAD_REQ` -> `STATE_LOAD_WB`)**: Single-cycle request for stores, two-cycle request/writeback for loads to match synchronous BRAM read latency, using a dedicated 0-cycle effective-address adder (`reg_a + mem_imm`) that bypasses `imm_gen` and the main ALU muxes for `mem_addr`, byte enables, and misaligned halfword/word trap detection (`mem_req`/`mem_we` suppression).
 
 ---
 
@@ -177,7 +177,7 @@ Risk-V/
 │   │   ├── digital/               # Digital logic schematics (.dig files)
 │   │   └── verilog/               # Verilog export & Verilator SDL2 testbench
 │   └── multi-cycle/               # Phase 2: Multi-Cycle FPGA Core
-│       ├── TODO.md                # Deferred post-synthesis timing backlog
+│       ├── TODO.md                # Phase 2 post-synthesis backlog (all timing items resolved)
 │       ├── core/                  # SystemVerilog RTL implementation
 │       │   ├── rv32_pkg.sv        # Package with opcodes, funct3/7/12, CSRs, causes, ALU & FSM types
 │       │   ├── rv32_core.sv       # CPU core top (links FSM & Datapath)
@@ -196,7 +196,8 @@ Risk-V/
 │       │   ├── uart.sv            # Hardware UART (64B RX/TX FIFOs, error flags)
 │       │   └── arty_a7_top.sv     # Top-level wrapper & reset sync for Arty A7-100T
 │       └── sim/                   # Verilator + SDL2 + PTY simulator for arty_a7_top
-│           ├── clk_wiz_0.sv       # Behavioral MMCM stub for Verilator
+│           ├── clk_wiz_0.sv       # Behavioral CPU Clocking Wizard stub for Verilator
+│           ├── clk_wiz_1.sv       # Behavioral VGA Clocking Wizard stub for Verilator
 │           ├── sim.vlt            # Verilator config exposing clock/RAM/VRAM hooks
 │           ├── gen_boot_mem.py    # Converts Wozmon .bin to 65536-word boot.mem
 │           ├── sim_main.cpp       # SDL2 + bit-accurate UART PTY + dual-mode VGA harness
@@ -260,7 +261,7 @@ make lint            # Strict verilator --lint-only (zero -Wno-* suppressions)
 For maximum simulation speed, Profile-Guided Optimization (`make pgo-gen`, run briefly with `make run`, then `make pgo-use`) works on both Linux GCC and macOS Apple Clang.
 
 Key simulator features:
-- **Exact FPGA Top (`arty_a7_top`)**: Simulates `arty_a7_top.sv` directly (with a behavioral `clk_wiz_0.sv` stub), exercising `BTN0` reset synchronizers, BRAM boot initialization (`boot.mem`), 115200 8N1 UART pins, and VGA pins.
+- **Exact FPGA Top (`arty_a7_top`)**: Simulates `arty_a7_top.sv` directly (with behavioral `clk_wiz_0.sv` and `clk_wiz_1.sv` stubs), exercising `BTN0` reset synchronizers, BRAM boot initialization (`boot.mem`), 115200 8N1 UART pins, and VGA pins.
 - **Virtual Serial Port (PTY)**: Works on Linux and macOS. On startup, the simulator prints a PTY path (e.g. `/dev/pts/4` or `/dev/ttys004`, or pass `--uart-link /tmp/arty_uart`). Connect with `picocom -b 115200 <pty>` or upload apps identically to hardware using `python3 Programs/tools/serialpaste.py --port <pty> Programs/out/multi_cycle/<app>/program.hex` (automatically runs `<addr>r` with no stray newline so apps stay running; pass `--no-run` to `serialpaste.py` or `bin2hex.py` to load without running).
 - **SDL2 Controls & Direct Preloading**: Type or paste (`Ctrl+V` / `PASTE` button) directly in the SDL2 window, toggle `BTN0 RESET` (`F1` / `Ctrl+R`), switch `VGA: FAST` / `VGA: PIN` live (`F2`), or skip UART transfer during rapid C development with `--load ../../../Programs/out/multi_cycle/<app>/program.bin` (and `--headless` for CI/scripted runs).
 
@@ -268,11 +269,10 @@ Key simulator features:
 1. Open Xilinx Vivado (2020.2 or newer recommended).
 2. Create an RTL project targeting `xc7a100tcsg324-1`.
 3. Add all SystemVerilog files from `cpu/multi-cycle/core/` (including `mul_unit.sv`, `div_unit.sv`, and `csr_unit.sv`).
-4. Configure a **Clocking Wizard** IP instance named `clk_wiz_0`:
-   - Input: 100 MHz oscillator (`CLK100MHZ`, pin E3).
-   - Output 1 (`clk_cpu`): 25.0 MHz (or higher — update `CPU_CLK_FREQ` parameter on `arty_a7_top` to match).
-   - Output 2 (`clk_vga`): 83.46 MHz (pixel clock for 1280x800 @ 60 Hz).
-5. Add Arty A7 constraint file (`.xdc`) mapping PMOD VGA headers (JB and JC), USB-UART (A9, D10), and Reset Button (D9).
+4. Configure two **Clocking Wizard** IP instances from the 100 MHz oscillator (`CLK100MHZ`, pin E3), both with `Primary → Source = No buffer` (so Vivado inserts a single shared `IBUF` on `CLK100MHZ`):
+   - `clk_wiz_0` (Primitive: `PLL`): `clk_out1` = CPU clock (e.g., `84.0 MHz` verified ceiling — update `CPU_CLK_FREQ` parameter on `arty_a7_top` to match).
+   - `clk_wiz_1` (Primitive: `MMCM`): `clk_out1` = `83.46 MHz` (pixel clock for 1280x800 @ 60 Hz).
+5. Add the Arty A7 constraint file (`.xdc`) mapping `CLK100MHZ` (E3, with `create_clock -period 10.000` uncommented), PMOD VGA headers (JB and JC), USB-UART (A9, D10), Reset Button (D9), and `set_max_delay -datapath_only` CDC constraints between `clk_out1_clk_wiz_0` and `clk_out1_clk_wiz_1` on `u_soc_top/u_vga_controller/*_sync_1_reg*` and `u_soc_top/*_sync_1_reg*`.
 6. Run Synthesis, Implementation, and Generate Bitstream.
 
 ---
@@ -299,14 +299,16 @@ Key simulator features:
   - [x] Target BSP/HAL refactoring (`Programs/bsp/`) unifying `single_cycle` and `multi_cycle` across all C apps.
   - [x] `Zicsr` CSR instructions & `Zicntr`/M-mode counter & info CSRs (`csr_unit.sv`, `STATE_CSR`).
   - [x] Trap/exception & M-mode privilege support (illegal-instruction/CSR & misaligned-address decode, `mstatus`/`mtvec`/`mepc`/`mcause`/`mtval`, `ECALL`/`EBREAK`/`MRET`, `STATE_TRAP`/`STATE_MRET`).
-  - [ ] Vivado bitstream synthesis & timing closure (including post-synthesis evaluation of deferred `ALUOut`/`mem_addr` bypass in `TODO.md`).
-  - [ ] Physical hardware bring-up and verification on Arty A7-100T silicon, followed by future OS/kernel experiments.
-  - [ ] Fast binary UART bootloader / interactive C BIOS shell & QSPI flash / SD card persistent storage.
+  - [x] Vivado bitstream synthesis & timing closure (84.0 MHz CPU / 83.46 MHz VGA with 0-cycle `eff_addr` bypass; `ALUOut`/`MDR` staging evaluated and skipped to preserve CPI).
+  - [x] Physical hardware bring-up and verification on Arty A7-100T silicon (`dvd_bounce`, `GoL`, `mandelbrot`, and 3D `wireframe` verified over UART + VGA) — Phase 2 base hardware RTL complete.
+  - [ ] VGA color depth & DAC hardware upgrade (wire physical 12-bit RGB444 resistor-ladder DAC on Pmod VGA; optional full 16-bit RGB565 output via temporal/spatial dithering or 16-pin DAC in `vga_controller.sv`).
+  - [ ] Software & firmware expansion (fast binary UART bootloader / interactive C BIOS shell and new bare-metal programs/demos).
 - [ ] **Phase 3: RV32IM 5-Stage Pipelined Core**
   - [ ] Pipeline stage registers (`IF/ID`, `ID/EX`, `EX/MEM`, `MEM/WB` register slices).
   - [ ] Hazard detection unit (load-use hazard detection, PC and `IF/ID` stall generation).
   - [ ] Bypass / forwarding unit (`EX/MEM` to EX and `MEM/WB` to EX forwarding).
   - [ ] Control hazard resolution (EX-stage branch target computation and `IF/ID` / `ID/EX` pipeline flush on mispredicts).
+  - [ ] Peripheral & storage expansion (PMOD SD card / SPI persistent storage, QSPI flash, and expanded I/O).
 - [ ] **Phase 4: RV64 Core, Virtual Memory & Linux Boot**
   - [ ] 64-bit datapath scaling (`XLEN=64` PC, 32 × 64-bit register file, 64-bit ALU + `ADDW`/`SUBW`/`SLLW`, double-word `LD`/`SD`).
   - [ ] Privileged architecture (S-Mode/U-Mode CSRs `stvec`/`sepc`/`scause`/`sstatus`/`stval`, `SRET`, trap delegation `mideleg`/`medeleg`, and `CLINT`/`PLIC` interrupts).

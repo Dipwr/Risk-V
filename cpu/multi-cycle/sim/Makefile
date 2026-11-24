@@ -35,6 +35,7 @@ CORE_DIR := ../core
 SV_SRCS := \
 	sim.vlt \
 	clk_wiz_0.sv \
+	clk_wiz_1.sv \
 	$(CORE_DIR)/rv32_pkg.sv \
 	$(CORE_DIR)/alu.sv \
 	$(CORE_DIR)/bram_ram.sv \
@@ -52,7 +53,7 @@ SV_SRCS := \
 	$(CORE_DIR)/soc_top.sv \
 	$(CORE_DIR)/arty_a7_top.sv
 
-CORE_ONLY_SV := $(filter-out sim.vlt clk_wiz_0.sv $(CORE_DIR)/soc_top.sv $(CORE_DIR)/arty_a7_top.sv,$(SV_SRCS))
+CORE_ONLY_SV := $(filter-out sim.vlt clk_wiz_0.sv clk_wiz_1.sv $(CORE_DIR)/soc_top.sv $(CORE_DIR)/arty_a7_top.sv,$(SV_SRCS))
 SOC_ONLY_SV  := $(CORE_ONLY_SV) $(CORE_DIR)/soc_top.sv
 
 # Default to --x-assign fast / --x-initial fast for simulation throughput;
