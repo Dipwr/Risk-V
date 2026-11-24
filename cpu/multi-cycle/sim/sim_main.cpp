@@ -1254,3 +1254,5 @@ int main(int argc, char **argv) {
 
 	return 0;
 }
+
+double sc_time_stamp() { return 0; }
