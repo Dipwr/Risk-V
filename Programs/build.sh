@@ -45,7 +45,7 @@ TARGET=""
 APP_ARG=""
 
 if [ ${#POS_ARGS[@]} -eq 0 ]; then
-	TARGETS=($(find bsp -mindepth 1 -maxdepth 1 -type d ! -name include -printf '%f\n' | sort))
+	TARGETS=($(find bsp -mindepth 1 -maxdepth 1 -type d ! -name include -exec basename {} \; | sort))
 	if [ ${#TARGETS[@]} -eq 0 ]; then
 		echo "Error: No target BSPs found under bsp/"
 		exit 1
@@ -59,7 +59,7 @@ if [ ${#POS_ARGS[@]} -eq 0 ]; then
 		fi
 	done
 
-	DIRS=($(find apps -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort))
+	DIRS=($(find apps -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort))
 	if [ ${#DIRS[@]} -eq 0 ]; then
 		echo "Error: No apps found under apps/"
 		exit 1

@@ -240,7 +240,7 @@ static void update_status_bar(uint32_t pass_cnt, uint32_t fail_cnt,
 
 	draw_str(10, 176, line, C_WHITE);
 	if (done) {
-		draw_str(10, 188, "PRESS ENTER OR ESC TO RETURN TO WOZMON", C_WHITE);
+		draw_str(10, 188, "PRESS Q OR ESC TO RETURN TO WOZMON", C_WHITE);
 	}
 }
 
@@ -317,17 +317,18 @@ int main(void) {
 	bsp_putc('/');
 	uart_print_dec(COMPLIANCE_TEST_COUNT);
 	bsp_puts(" PASSED ===\n");
-	bsp_puts("Press Enter or Esc to return to Wozmon...\n");
+	bsp_puts("Press Q or Esc to return to Wozmon...\n");
 
-	/* Drain any stale bytes left in UART RX FIFO (e.g., trailing CR from Wozmon) */
+	/* Drain any stale bytes left in UART RX FIFO (e.g., trailing CR/LF from Wozmon) */
 	while (bsp_key_avail()) {
 		(void)bsp_getc();
 	}
 
-	/* Keep visual dashboard visible until user explicitly presses Enter, Esc, or Q */
+	/* Keep visual dashboard visible until user explicitly presses Q or Esc
+	 * (ignore Enter/CR/LF so typing "10000r<Enter>" never immediately exits) */
 	for (;;) {
 		char c = bsp_getc();
-		if (c == '\r' || c == '\n' || c == 27 || c == 'q' || c == 'Q') {
+		if (c == 27 || c == 'q' || c == 'Q') {
 			break;
 		}
 	}
