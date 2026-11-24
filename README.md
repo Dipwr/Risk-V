@@ -54,7 +54,7 @@ The primary goal of **Risk-V** is to build a complete, self-contained RISC-V com
 - **Target Hardware**: Digilent Arty A7-100T (Xilinx Artix-7 `XC7A100T`, 135 BRAMs — required for 512 KB total on-chip RAM + VRAM).
 - **Core RTL**: Written in modular SystemVerilog (`cpu/multi-cycle/core/`) using synchronous resets across all sequential logic for Xilinx 7-series primitive packing (`DSP48E1`, `RAMB36E1`, `RAM32M`/`RAM64M`).
 - **Clock Domains & Reset Architecture**:
-  - `clk_cpu` (parameterized `CPU_CLK_FREQ`, default `60 MHz`): Core logic, BRAM, UART, MMIO, generated via Xilinx Clocking Wizard (`clk_wiz_0`, PLL).
+  - `clk_cpu` (parameterized `CPU_CLK_FREQ`, default `84 MHz` in `arty_a7_top.sv`): Core logic, BRAM, UART, MMIO, generated via Xilinx Clocking Wizard (`clk_wiz_0`, PLL).
   - `clk_vga` (`83.46 MHz`): VESA 1280x800 @ 60 Hz CVT pixel clock, generated via a separate Xilinx Clocking Wizard (`clk_wiz_1`, MMCM) so CPU frequency scaling does not alter VGA timing.
   - Both clock wizards are fed from the onboard 100 MHz oscillator (`CLK100MHZ`) and kept continuously running (`.reset(1'b0)`) so `BTN0` never stops or glitches clocks; `clk_locked` combines `clk_cpu_locked && clk_vga_locked`.
   - Per-domain async-assert / sync-deassert reset synchronizers (`rst_cpu`, `rst_vga`) in `arty_a7_top.sv` driven by `btn_rst || !clk_locked`.
@@ -160,6 +160,7 @@ All applications build against both `single_cycle` and `multi_cycle` targets via
 - `bounce_sim`: Multi-ball Q16.16 physics simulation.
 - `dvd_bounce`: Double-buffered bouncing box test.
 - `profiler_workload`: PGO and simulator benchmark combining 3D rotation and procedural rendering.
+- `riscv-compliance` (`Programs/riscv-compliance/build_compliance.sh`, Phase 2 target): Bare-metal visual runner for 58 official `riscv-tests` ISA compliance tests (`rv32ui` 40, `rv32um` 8, `rv32mi` 10) with live VGA tile grid and `cycle`-CSR timing.
 
 ---
 
@@ -211,6 +212,7 @@ Risk-V/
     ├── lib/
     │   └── syscalls.c             # Target-agnostic Newlib-nano syscall bridge
     ├── apps/                      # Hardware-agnostic bare-metal tests & demos
+    ├── riscv-compliance/          # Official riscv-tests visual runner (rv32ui/rv32um/rv32mi)
     ├── bootloaders/               # Wozmon bootloaders (single_cycle, multi_cycle) & asm demos
     ├── assets/3d/                 # 3D models (OBJ) and C array converter
     └── tools/                     # bin2hex.py, paste.py, serialpaste.py, rv32i_to_intel_hex.py
@@ -299,6 +301,7 @@ Key simulator features:
   - [x] Target BSP/HAL refactoring (`Programs/bsp/`) unifying `single_cycle` and `multi_cycle` across all C apps.
   - [x] `Zicsr` CSR instructions & `Zicntr`/M-mode counter & info CSRs (`csr_unit.sv`, `STATE_CSR`).
   - [x] Trap/exception & M-mode privilege support (illegal-instruction/CSR & misaligned-address decode, `mstatus`/`mtvec`/`mepc`/`mcause`/`mtval`, `ECALL`/`EBREAK`/`MRET`, `STATE_TRAP`/`STATE_MRET`).
+  - [x] Official `riscv-tests` compliance runner (`Programs/riscv-compliance/`: 58 tests across `rv32ui`, `rv32um`, and `rv32mi`).
   - [x] Vivado bitstream synthesis & timing closure (84.0 MHz CPU / 83.46 MHz VGA with 0-cycle `eff_addr` bypass; `ALUOut`/`MDR` staging evaluated and skipped to preserve CPI).
   - [x] Physical hardware bring-up and verification on Arty A7-100T silicon (`dvd_bounce`, `GoL`, `mandelbrot`, and 3D `wireframe` verified over UART + VGA) — Phase 2 base hardware RTL complete.
   - [ ] VGA color depth & DAC hardware upgrade (wire physical 12-bit RGB444 resistor-ladder DAC on Pmod VGA; optional full 16-bit RGB565 output via temporal/spatial dithering or 16-pin DAC in `vga_controller.sv`).

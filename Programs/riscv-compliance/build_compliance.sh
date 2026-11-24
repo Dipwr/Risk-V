@@ -5,12 +5,31 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROGRAMS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROGRAMS_DIR"
 
+NO_CLIP=0
+for arg in "$@"; do
+	if [ "$arg" = "--no-clip" ]; then
+		NO_CLIP=1
+	fi
+done
+
+if [ -f "../.venv/bin/python3" ]; then
+	PYTHON_BIN="../.venv/bin/python3"
+elif [ -f ".venv/bin/python3" ]; then
+	PYTHON_BIN=".venv/bin/python3"
+else
+	PYTHON_BIN="python3"
+fi
+
 if command -v riscv-none-elf-gcc &> /dev/null; then
 	PREFIX="riscv-none-elf-"
 elif command -v riscv64-unknown-elf-gcc &> /dev/null; then
 	PREFIX="riscv64-unknown-elf-"
+elif command -v riscv64-elf-gcc &> /dev/null; then
+	PREFIX="riscv64-elf-"
 elif command -v riscv32-unknown-elf-gcc &> /dev/null; then
 	PREFIX="riscv32-unknown-elf-"
+elif command -v riscv64-linux-gnu-gcc &> /dev/null; then
+	PREFIX="riscv64-linux-gnu-"
 else
 	echo "Error: No supported RISC-V GCC toolchain found in PATH."
 	exit 1
@@ -119,10 +138,11 @@ compile_suite() {
 		"${PREFIX}objcopy" --keep-global-symbol="$func" "$obj"
 		TEST_OBJS+=("$obj")
 
-		local sname
+		local sname suite_upper
 		sname="$(short_label "$name")"
+		suite_upper="$(echo "$suite" | tr '[:lower:]' '[:upper:]')"
 		echo "extern uint32_t ${func}(void);" >> "$TABLE_HEADER"
-		TABLE_ENTRIES="${TABLE_ENTRIES}\t{ ${suite_enum}, \"${suite^^}\", \"${name}\", \"${sname}\", ${func} },\n"
+		TABLE_ENTRIES="${TABLE_ENTRIES}\t{ ${suite_enum}, \"${suite_upper}\", \"${name}\", \"${sname}\", ${func} },\n"
 		TOTAL_COUNT=$((TOTAL_COUNT + 1))
 	done
 }
@@ -148,7 +168,7 @@ compile_suite "rv32mi" "SUITE_MI" "${RV32MI_TESTS[@]}"
 	echo "#endif /* RISCV_COMPLIANCE_TEST_TABLE_H */"
 } >> "$TABLE_HEADER"
 
-CFLAGS=(-march="${TARGET_MARCH}" -mabi=ilp32 -O2 "-D${TARGET_MACRO}" -Ibsp/include -I"$OUT_DIR")
+CFLAGS=(-march="${TARGET_MARCH}" -mabi=ilp32 -O2 -ffreestanding "-D${TARGET_MACRO}" -Ibsp/include -I"$OUT_DIR")
 
 echo "[CC] $SCRIPT_DIR/main.c"
 "${PREFIX}gcc" -c "${CFLAGS[@]}" "$SCRIPT_DIR/main.c" -o "$OUT_DIR/main.o"
@@ -156,19 +176,26 @@ echo "[CC] $SCRIPT_DIR/main.c"
 echo "[CC] $BSP_DIR/hal.c"
 "${PREFIX}gcc" -c "${CFLAGS[@]}" "$BSP_DIR/hal.c" -o "$OUT_DIR/hal.o"
 
-echo "[CC] $PROGRAMS_DIR/lib/syscalls.c"
-"${PREFIX}gcc" -c "${CFLAGS[@]}" "$PROGRAMS_DIR/lib/syscalls.c" -o "$OUT_DIR/syscalls.o"
-
 echo "[AS] $BSP_DIR/boot.s"
 "${PREFIX}as" -march="${TARGET_MARCH}" -mabi=ilp32 "$BSP_DIR/boot.s" -o "$OUT_DIR/boot.o"
 
 echo "[LD] $OUT_DIR/program.elf"
-"${PREFIX}gcc" -march="${TARGET_MARCH}" -mabi=ilp32 -T "$BSP_DIR/linker.ld" -nostartfiles \
-	"$OUT_DIR/boot.o" "$OUT_DIR/main.o" "$OUT_DIR/hal.o" "$OUT_DIR/syscalls.o" \
+"${PREFIX}gcc" -march="${TARGET_MARCH}" -mabi=ilp32 -T "$BSP_DIR/linker.ld" -nostdlib -nostartfiles -Wl,-m,elf32lriscv \
+	"$OUT_DIR/boot.o" "$OUT_DIR/main.o" "$OUT_DIR/hal.o" \
 	"${TEST_OBJS[@]}" \
-	-Wl,--gc-sections -o "$OUT_DIR/program.elf"
+	-lgcc -Wl,--gc-sections -o "$OUT_DIR/program.elf"
 
 "${PREFIX}objcopy" -O binary "$OUT_DIR/program.elf" "$OUT_DIR/program.bin"
+"${PYTHON_BIN}" tools/bin2hex.py --addr "${WOZMON_ADDR:-10000}" "$OUT_DIR/program.bin" "$OUT_DIR/program.hex"
+
+if [ "$NO_CLIP" -eq 0 ] && [ -f "tools/paste.py" ]; then
+	if "${PYTHON_BIN}" tools/paste.py "$OUT_DIR/program.hex"; then
+		echo "[CLIPBOARD] Payload ready to paste into Wozmon!"
+	else
+		echo "[CLIPBOARD] Warning: clipboard copy skipped (no display or pyperclip unavailable)."
+	fi
+fi
+
 "${PREFIX}size" "$OUT_DIR/program.elf"
-ls -lh "$OUT_DIR/program.bin"
+ls -lh "$OUT_DIR/program.bin" "$OUT_DIR/program.hex"
 echo "Done: $TOTAL_COUNT compliance tests compiled."
