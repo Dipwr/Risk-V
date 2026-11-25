@@ -3,8 +3,8 @@ ENTRY(_start)
 
 MEMORY
 {
-	/* 192 KB User RAM starting at 0x00010000 (leaving lower 64 KB for Wozmon) */
-	RAM (rwx) : ORIGIN = 0x00010000, LENGTH = 192K
+	/* 248 KB User RAM starting at 0x00002000 (leaving lower 8 KB for UART bootloader) */
+	RAM (rwx) : ORIGIN = 0x00002000, LENGTH = 248K
 }
 
 /* Stack top at ceiling of 256 KB Main RAM; 32 KB stack reserve below _stack_top */

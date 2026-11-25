@@ -71,8 +71,8 @@ The primary goal of **Risk-V** is to build a complete, self-contained RISC-V com
 | Region               | Base Address | End Address  | Size   | Notes          |
 +----------------------+--------------+--------------+--------+----------------+
 | System RAM (BRAM)    | 0x0000_0000  | 0x0003_FFFF  | 256 KB | Boot/Code      |
-|   Wozmon Monitor     | 0x0000_0000  | 0x0000_FFFF  | 64 KB  | Bootloader     |
-|   User Program Area  | 0x0001_0000  | 0x0003_FFFF  | 192 KB | Apps/Stack     |
+|   UART Bootloader    | 0x0000_0000  | 0x0000_1FFF  | 8 KB   | Binary RVBL    |
+|   User Program Area  | 0x0000_2000  | 0x0003_FFFF  | 248 KB | Apps/Stack     |
 | Video RAM (VRAM)     | 0x1000_0000  | 0x1003_FFFF  | 256 KB | Dual-Port      |
 |   Framebuffer Page 0 | 0x1000_0000  | 0x1001_FFFF  | 128 KB | 320x200 RGB565 |
 |   Framebuffer Page 1 | 0x1002_0000  | 0x1003_FFFF  | 128 KB | 320x200 RGB565 |
@@ -134,24 +134,21 @@ The multi-cycle core (`rv32_core.sv`) decouples control (`control_fsm.sv`) from 
 
 ## 💻 Software & Ecosystem
 
-### 1. Wozmon Interactive Bootloader
-Ported to RV32I assembly (`Programs/bootloaders/multi_cycle/visual_wozmon320x200.s` for Phase 2, and `Programs/bootloaders/single_cycle/` for Phase 1). Runs on power-up and provides an interactive terminal over UART and on-screen framebuffer:
-- Inspect memory addresses: `<addr>` (e.g. `10000`).
-- Examine memory ranges: `<start>.<end>`.
-- Deposit data bytes: `<addr>: <val1> <val2> ...`.
-- Execute user programs: `<addr> R` (e.g. `10000 R`).
+### 1. Bootloaders (`uart_boot` & Wozmon)
+- **Phase 2 Binary UART Bootloader (`Programs/bootloaders/multi_cycle/uart_boot/`)**: Compact (< 3 KB) bare-metal binary loader occupying the lower 8 KB of BRAM (`0x0000_0000`–`0x0000_1FFF`), leaving **248 KB** (`0x0000_2000`–`0x0003_FFFF`) for user programs. Supports framed binary transfers (`RVBL` + `addr` + `size` + IEEE 802.3 CRC32 + `ACK`/`NAK`), fast preloaded jump (`RVGO` + `addr`), and a 320×200 VGA status/progress bar. Driven from the host via `Programs/tools/upload.py`.
+- **Phase 1 Wozmon Monitor (`Programs/bootloaders/single_cycle/`)**: Interactive hex monitor/loader in RV32I assembly for the Phase 1 single-cycle simulator.
 
 ### 2. Multi-Target BSP & Bare-Metal C Toolchain
 - **Compiler**: Standard RISC-V GCC toolchain (`riscv-none-elf-gcc`, `riscv64-unknown-elf-gcc`, etc.) with `-mabi=ilp32 -O2` and per-target `-march` configured via `TARGET_MARCH` in `Programs/bsp/<target>/target.env` (`rv32im_zicsr_zicntr` for `multi_cycle`, `rv32im` for `single_cycle`).
 - **Target BSPs (`Programs/bsp/`)**:
   - `bsp/include/bsp.h`: Unified HAL API (`bsp_vram_page`, `bsp_set_page`, `bsp_set_vsync`, `bsp_vblank`, `bsp_active_page`, `bsp_wait_vblank`, `bsp_present_page`, `bsp_putc`, `bsp_puts`, `bsp_key_avail`, `bsp_getc`, `bsp_try_getc`, `bsp_exit`) abstracting memory maps, VRAM page strides (`64000` vs `65536` pixels), VSync/active-page handoff, and console/UART I/O.
   - `bsp/single_cycle/`: Phase 1 target (`0x0004_0000` RAM, `0x0008_2000` VRAM, `TERM_OUT`/`KEY_*` MMIO, Wozmon load `40000`).
-  - `bsp/multi_cycle/`: Phase 2 target (`0x0001_0000` RAM, `0x1000_0000` VRAM, polling UART + VBlank `PAGE_REG`, Wozmon load `10000`).
+  - `bsp/multi_cycle/`: Phase 2 target (`0x0000_2000` RAM, 248 KB, `0x1000_0000` VRAM, polling UART + VBlank `PAGE_REG`, `upload.py` load `0x00002000`).
 - **Syscalls**: Target-agnostic Newlib-nano bridge (`Programs/lib/syscalls.c`) delegating `_write`, `_read`, `_sbrk`, and `_exit` to the active BSP HAL and linker symbols (`_end`, `_heap_limit`).
-- **Automation**: `Programs/build.sh` compiles for either `multi_cycle` (default) or `single_cycle`, emits artifacts under `Programs/out/<target>/<app>/`, generates Wozmon hex payloads via `Programs/tools/bin2hex.py`, and copies the payload to the clipboard via `Programs/tools/paste.py` (with `Programs/tools/serialpaste.py` for UART upload).
+- **Automation**: `Programs/build.sh` compiles for either `multi_cycle` (default) or `single_cycle`, emits `program.{elf,bin,hex}` under `Programs/out/<target>/<app>/`, and prints `upload.py` instructions for `multi_cycle` (or copies Wozmon hex to clipboard for `single_cycle`).
 
-### 3. Application & Test Suite (`Programs/apps/`)
-All applications build against both `single_cycle` and `multi_cycle` targets via `bsp.h`:
+### 3. Applications, RTOS & Benchmarks (`Programs/`)
+All applications under `Programs/apps/` build against both `single_cycle` and `multi_cycle` targets via `bsp.h`:
 - `test_suite`: RV32IM architectural verification suite (102 base + multiply tests; optional divider tests).
 - `wireframe`: 3D matrix rotation & Bresenham wireframe renderer with live VSync ON/OFF toggle (`v`) (models in `Programs/assets/3d/`).
 - `fluid_sim`: 2D Eulerian wind tunnel & pressure fluid solver.
@@ -161,6 +158,13 @@ All applications build against both `single_cycle` and `multi_cycle` targets via
 - `dvd_bounce`: Double-buffered bouncing box test.
 - `profiler_workload`: PGO and simulator benchmark combining 3D rotation and procedural rendering.
 - `riscv-compliance` (`Programs/riscv-compliance/build_compliance.sh`, Phase 2 target): Bare-metal visual runner for 58 official `riscv-tests` ISA compliance tests (`rv32ui` 40, `rv32um` 8, `rv32mi` 10) with live VGA tile grid and `cycle`-CSR timing.
+
+Additional Phase 2 (`multi_cycle`) suites built with on-demand upstream sources (`Programs/third_party/`, gitignored):
+- **RISC-V Official Compliance (`Programs/riscv-compliance/`)**: Visual 58-test `riscv-tests` runner (`rv32ui`, `rv32um`, `rv32mi`).
+- **Cooperative FreeRTOS (`Programs/freertos_demo/`)**: Upstream `FreeRTOS-Kernel` V11.1.0 (`portable/GCC/RISC-V`) running 3 concurrent tasks (`vAnimTask`, `vTelemetryTask`, `vConsoleTask`) with `ECALL`/`MRET` yields, FreeRTOS queues, VGA animation + HUD, and UART telemetry.
+- **CPU Benchmarks (`Programs/benchmarks/`)** (measured at `-O2`, 84 MHz target clock):
+  - **EEMBC CoreMark (`coremark/`)**: `0.9681 CoreMark/MHz` (`81.32 CoreMark @ 84 MHz`, Avg CPI `3.293`, verified with 50 iterations; pass `--iterations 2000` for an official ≥10 s FPGA run).
+  - **Dhrystone 2.2 (`dhrystone/`)**: `0.4391 DMIPS/MHz` (`36.88 DMIPS @ 84 MHz`, Avg CPI `3.357` over 500 runs).
 
 ---
 
@@ -178,7 +182,7 @@ Risk-V/
 │   │   ├── digital/               # Digital logic schematics (.dig files)
 │   │   └── verilog/               # Verilog export & Verilator SDL2 testbench
 │   └── multi-cycle/               # Phase 2: Multi-Cycle FPGA Core
-│       ├── TODO.md                # Phase 2 post-synthesis backlog (all timing items resolved)
+│       ├── TODO.md                # Phase 2 RTOS/interrupt backlog (84 MHz timing closed)
 │       ├── core/                  # SystemVerilog RTL implementation
 │       │   ├── rv32_pkg.sv        # Package with opcodes, funct3/7/12, CSRs, causes, ALU & FSM types
 │       │   ├── rv32_core.sv       # CPU core top (links FSM & Datapath)
@@ -212,10 +216,12 @@ Risk-V/
     ├── lib/
     │   └── syscalls.c             # Target-agnostic Newlib-nano syscall bridge
     ├── apps/                      # Hardware-agnostic bare-metal tests & demos
+    ├── benchmarks/                # CoreMark & Dhrystone 2.2 benchmark wrappers
+    ├── bootloaders/               # uart_boot (multi_cycle), Wozmon (single_cycle) & asm demos
+    ├── freertos_demo/             # Cooperative FreeRTOS V11.1.0 VGA + UART demo
     ├── riscv-compliance/          # Official riscv-tests visual runner (rv32ui/rv32um/rv32mi)
-    ├── bootloaders/               # Wozmon bootloaders (single_cycle, multi_cycle) & asm demos
     ├── assets/3d/                 # 3D models (OBJ) and C array converter
-    └── tools/                     # bin2hex.py, paste.py, serialpaste.py, rv32i_to_intel_hex.py
+    └── tools/                     # upload.py, bin2hex.py, paste.py, serialpaste.py
 ```
 
 ---
@@ -264,8 +270,8 @@ For maximum simulation speed, Profile-Guided Optimization (`make pgo-gen`, run b
 
 Key simulator features:
 - **Exact FPGA Top (`arty_a7_top`)**: Simulates `arty_a7_top.sv` directly (with behavioral `clk_wiz_0.sv` and `clk_wiz_1.sv` stubs), exercising `BTN0` reset synchronizers, BRAM boot initialization (`boot.mem`), 115200 8N1 UART pins, and VGA pins.
-- **Virtual Serial Port (PTY)**: Works on Linux and macOS. On startup, the simulator prints a PTY path (e.g. `/dev/pts/4` or `/dev/ttys004`, or pass `--uart-link /tmp/arty_uart`). Connect with `picocom -b 115200 <pty>` or upload apps identically to hardware using `python3 Programs/tools/serialpaste.py --port <pty> Programs/out/multi_cycle/<app>/program.hex` (automatically runs `<addr>r` with no stray newline so apps stay running; pass `--no-run` to `serialpaste.py` or `bin2hex.py` to load without running).
-- **SDL2 Controls & Direct Preloading**: Type or paste (`Ctrl+V` / `PASTE` button) directly in the SDL2 window, toggle `BTN0 RESET` (`F1` / `Ctrl+R`), switch `VGA: FAST` / `VGA: PIN` live (`F2`), or skip UART transfer during rapid C development with `--load ../../../Programs/out/multi_cycle/<app>/program.bin` (and `--headless` for CI/scripted runs).
+- **Virtual Serial Port (PTY)**: Works on Linux and macOS. On startup, the simulator prints a PTY path (e.g. `/dev/pts/4` or `/dev/ttys004`, or pass `--uart-link /tmp/arty_uart`). Connect with `picocom -b 115200 <pty>` or upload apps identically to hardware using `python3 Programs/tools/upload.py Programs/out/multi_cycle/<app>/program.bin --port <pty> --monitor`.
+- **SDL2 Controls & Direct Preloading**: Toggle `BTN0 RESET` (`F1` / `Ctrl+R`), switch `VGA: FAST` / `VGA: PIN` live (`F2`), or skip UART transfer during rapid C development with `--load ../../../Programs/out/multi_cycle/<app>/program.bin` (default `0x2000`) and jump via `python3 Programs/tools/upload.py --go-only --port <pty>` (plus `--headless` for CI/scripted runs).
 
 ### 4. Synthesizing Phase 2 for Digilent Arty A7-100T
 1. Open Xilinx Vivado (2020.2 or newer recommended).
@@ -305,7 +311,8 @@ Key simulator features:
   - [x] Vivado bitstream synthesis & timing closure (84.0 MHz CPU / 83.46 MHz VGA with 0-cycle `eff_addr` bypass; `ALUOut`/`MDR` staging evaluated and skipped to preserve CPI).
   - [x] Physical hardware bring-up and verification on Arty A7-100T silicon (`dvd_bounce`, `GoL`, `mandelbrot`, and 3D `wireframe` verified over UART + VGA) — Phase 2 base hardware RTL complete.
   - [ ] VGA color depth & DAC hardware upgrade (wire physical 12-bit RGB444 resistor-ladder DAC on Pmod VGA; optional full 16-bit RGB565 output via temporal/spatial dithering or 16-pin DAC in `vga_controller.sv`).
-  - [ ] Software & firmware expansion (fast binary UART bootloader / interactive C BIOS shell and new bare-metal programs/demos).
+  - [x] Fast binary UART bootloader (`uart_boot`, CRC32 + VGA progress bar + `upload.py`, expanding user RAM to 248 KB), Cooperative FreeRTOS demo, and CoreMark/Dhrystone benchmarks.
+  - [ ] M-mode RTOS hardware upgrades (target >= 80–84 MHz): CLINT MMIO timer (`mtime`/`mtimecmp` + `MTI`), `mie`/`mip` CSRs, UART RX & VBlank `MEI` interrupts, `WFI`, lower-8 KB bootloader write-protect, and MMIO soft-reset/watchdog (`cpu/multi-cycle/TODO.md`).
 - [ ] **Phase 3: RV32IM 5-Stage Pipelined Core**
   - [ ] Pipeline stage registers (`IF/ID`, `ID/EX`, `EX/MEM`, `MEM/WB` register slices).
   - [ ] Hazard detection unit (load-use hazard detection, PC and `IF/ID` stall generation).

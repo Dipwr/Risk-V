@@ -27,9 +27,12 @@ RISCV_PREFIX := $(shell \
 	done)
 RISCV_GCC     := $(RISCV_PREFIX)gcc
 RISCV_OBJCOPY := $(RISCV_PREFIX)objcopy
+RISCV_SIZE    := $(RISCV_PREFIX)size
 PYTHON        := $(shell if [ -x ../../../.venv/bin/python3 ]; then echo ../../../.venv/bin/python3; else echo python3; fi)
 
-BOOT_ASM := ../../../Programs/bootloaders/multi_cycle/visual_wozmon320x200.s
+BOOT_DIR := ../../../Programs/bootloaders/multi_cycle/uart_boot
+BOOT_SRCS := $(BOOT_DIR)/boot.s $(BOOT_DIR)/main.c
+BOOT_LD   := $(BOOT_DIR)/linker.ld
 CORE_DIR := ../core
 
 SV_SRCS := \
@@ -89,12 +92,14 @@ strict:
 	rm -rf obj_dir
 	$(MAKE) all X_MODE=unique
 
-boot.mem: $(BOOT_ASM) gen_boot_mem.py
+boot.mem: $(BOOT_SRCS) $(BOOT_LD) gen_boot_mem.py
 	@if [ -z "$(RISCV_PREFIX)" ]; then \
 		echo "Error: No RISC-V GCC toolchain found in PATH to build boot.mem."; \
 		exit 1; \
 	fi
-	$(RISCV_GCC) -march=rv32im -mabi=ilp32 -nostdlib -nostartfiles -Wl,-Ttext=0x0 -o boot.elf $<
+	$(RISCV_GCC) -march=rv32im_zicsr_zicntr -mabi=ilp32 -O2 -nostdlib -nostartfiles \
+		-T $(BOOT_LD) -Wl,-m,elf32lriscv $(BOOT_SRCS) -o boot.elf
+	$(RISCV_SIZE) boot.elf
 	$(RISCV_OBJCOPY) -O binary boot.elf boot.bin
 	$(PYTHON) gen_boot_mem.py boot.bin $@
 	rm -f boot.elf boot.bin

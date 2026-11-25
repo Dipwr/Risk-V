@@ -168,7 +168,7 @@ ${PREFIX}gcc -march=${TARGET_MARCH} -mabi=ilp32 -T "$BSP_DIR/linker.ld" --specs=
 ${PREFIX}objcopy -O binary "$OUT_DIR/program.elf" "$OUT_DIR/program.bin"
 ${PYTHON_BIN} tools/bin2hex.py --addr "$WOZMON_ADDR" "$OUT_DIR/program.bin" "$OUT_DIR/program.hex"
 
-if [ "$NO_CLIP" -eq 0 ] && [ -f "tools/paste.py" ]; then
+if [ "$NO_CLIP" -eq 0 ] && [ "$TARGET" = "single_cycle" ] && [ -f "tools/paste.py" ]; then
 	if ${PYTHON_BIN} tools/paste.py "$OUT_DIR/program.hex"; then
 		echo "[CLIPBOARD] Payload ready to paste into Wozmon!"
 	else
@@ -178,4 +178,7 @@ fi
 
 echo "=================================================="
 echo " Build Success: $TARGET / $APP_NAME"
+if [ "$TARGET" = "multi_cycle" ]; then
+	echo " Upload (UART): python3 tools/upload.py $OUT_DIR/program.bin --port /dev/ttyUSB1"
+fi
 echo "=================================================="

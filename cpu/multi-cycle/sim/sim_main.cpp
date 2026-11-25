@@ -75,7 +75,7 @@ struct SimConfig {
 	uint64_t max_cycles = 0; // 0 = unlimited
 	std::string boot_mem_path;
 	std::string load_bin_path;
-	uint32_t load_addr = 0x00010000U;
+	uint32_t load_addr = 0x00002000U;
 	std::string uart_link_path;
 	std::string dump_ppm_path;
 };
@@ -960,7 +960,7 @@ void print_usage(const char *prog) {
 		<< "  --vga-mode fast|pin   VGA simulation mode (default: fast)\n"
 		<< "  --boot <path.mem>     Override initial BRAM contents (.mem hex)\n"
 		<< "  --load <path.bin>     Preload raw binary into system RAM\n"
-		<< "  --load-addr <hex>     Target byte address for --load (default: 0x10000)\n"
+		<< "  --load-addr <hex>     Target byte address for --load (default: 0x2000)\n"
 		<< "  --uart-link <path>    Create symlink to the virtual UART PTY device\n"
 		<< "  --no-stdout           Do not mirror UART TX bytes to stdout\n"
 		<< "  --headless            Run without opening an SDL2 window\n"
