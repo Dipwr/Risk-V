@@ -68,7 +68,7 @@ int main(void) {
   while (1) {
     if (bsp_key_avail()) {
       (void)bsp_getc();
-      bsp_puts("[Exiting to Wozmon...]\n");
+      bsp_puts("[Exiting to Bootloader...]\n");
       break;
     }
 
@@ -98,10 +98,9 @@ int main(void) {
     bsp_present_page((int)back_page);
     active_page = back_page;
 
-    for (volatile int delay = 0; delay < 20000; delay++)
-      ;
+    bsp_delay_ms(5);
   }
 
-  bsp_set_page(0);
+  bsp_exit();
   return 0;
 }

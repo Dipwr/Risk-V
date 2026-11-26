@@ -9,10 +9,6 @@
 
 extern void freertos_risc_v_trap_handler(void);
 
-/* Override weak symbol in FreeRTOS RISC-V port.c (no CLINT/timer IRQ) */
-void vPortSetupTimerInterrupt(void) {
-}
-
 void freertos_unhandled_irq(void) {
 	bsp_puts("[RTOS] Unexpected interrupt/exception!\n");
 	bsp_exit();
@@ -22,12 +18,11 @@ typedef struct {
 	uint64_t cycles;
 	uint64_t instret;
 	uint32_t anim_frames;
-	uint32_t yield_count;
+	uint32_t ticks;
 } telemetry_msg_t;
 
 static QueueHandle_t g_telemetry_q = NULL;
 static volatile uint32_t g_anim_frames = 0;
-static volatile uint32_t g_yield_count = 0;
 static volatile uint32_t g_msg_rx_count = 0;
 
 /* 5x7 uppercase/digit/symbol font (ASCII 32..95) */
@@ -178,15 +173,14 @@ static void vAnimTask(void *pvParameters) {
 static void vTelemetryTask(void *pvParameters) {
 	(void)pvParameters;
 	for (;;) {
-		g_yield_count++;
 		telemetry_msg_t msg;
 		msg.cycles = read_cycle64();
 		msg.instret = read_instret64();
 		msg.anim_frames = g_anim_frames;
-		msg.yield_count = g_yield_count;
+		msg.ticks = (uint32_t)xTaskGetTickCount();
 
 		(void)xQueueSend(g_telemetry_q, &msg, 0);
-		taskYIELD();
+		vTaskDelay(pdMS_TO_TICKS(50));
 	}
 }
 
@@ -198,14 +192,14 @@ static void vConsoleTask(void *pvParameters) {
 	uint32_t last_uart_frame = 0xFFFFFFFFU;
 
 	for (;;) {
-		if (xQueueReceive(g_telemetry_q, &msg, 0) == pdPASS) {
+		if (xQueueReceive(g_telemetry_q, &msg, pdMS_TO_TICKS(20)) == pdPASS) {
 			g_msg_rx_count++;
-			if (msg.anim_frames != last_vga_frame && (msg.anim_frames % 4U) == 0U) {
+			if (msg.anim_frames != last_vga_frame) {
 				last_vga_frame = msg.anim_frames;
 				snprintf(line, sizeof(line),
-				         "FRAMES:%-6lu YIELDS:%-6lu Q_RX:%-6lu",
+				         "FRAMES:%-6lu TICKS:%-7lu Q_RX:%-6lu",
 				         (unsigned long)msg.anim_frames,
-				         (unsigned long)msg.yield_count,
+				         (unsigned long)msg.ticks,
 				         (unsigned long)g_msg_rx_count);
 				draw_str(0, 12, 32, line, 0xFFFF, 0x0842);
 				draw_str(1, 12, 32, line, 0xFFFF, 0x0842);
@@ -219,11 +213,11 @@ static void vConsoleTask(void *pvParameters) {
 			}
 
 			if (msg.anim_frames != last_uart_frame &&
-			    (msg.anim_frames == 1U || (msg.anim_frames % 15U) == 0U)) {
+			    (msg.anim_frames == 1U || (msg.anim_frames % 5U) == 0U)) {
 				last_uart_frame = msg.anim_frames;
-				printf("[RTOS] frame=%lu yield=%lu q_rx=%lu cyc=%lu inst=%lu\n",
+				printf("[RTOS] frame=%lu ticks=%lu q_rx=%lu cyc=%lu inst=%lu\n",
 				       (unsigned long)msg.anim_frames,
-				       (unsigned long)msg.yield_count,
+				       (unsigned long)msg.ticks,
 				       (unsigned long)g_msg_rx_count,
 				       (unsigned long)(msg.cycles & 0xFFFFFFFFULL),
 				       (unsigned long)(msg.instret & 0xFFFFFFFFULL));
@@ -235,8 +229,6 @@ static void vConsoleTask(void *pvParameters) {
 			printf("[RTOS] Exiting to bootloader...\n");
 			bsp_exit();
 		}
-
-		taskYIELD();
 	}
 }
 
@@ -247,14 +239,14 @@ int main(void) {
 	for (int p = 0; p < 2; ++p) {
 		fill_rect(p, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 0x0842);
 		fill_rect(p, 0, 0, SCREEN_WIDTH, 20, 0x10A6);
-		draw_str(p, 12, 6, "FREERTOS V11.1.0 COOPERATIVE (ECALL/MRET)", 0xFFFF, 0x10A6);
+		draw_str(p, 12, 6, "FREERTOS V11.1.0 PREEMPTIVE (CLINT MTI)", 0xFFFF, 0x10A6);
 		draw_str(p, 12, 62, "PRESS Q OR ESC TO EXIT TO BOOTLOADER", 0xFFE0, 0x0842);
 		fill_rect(p, 8, 86, 304, 110, 0x4228);
 		fill_rect(p, 10, 88, 300, 106, 0x0842);
 	}
 
 	printf("\n====================================================\n");
-	printf(" FreeRTOS Kernel V11.1.0 Cooperative Demo (RV32IM)\n");
+	printf(" FreeRTOS Kernel V11.1.0 Preemptive Demo (RV32IM)\n");
 	printf(" Press 'q' or ESC to return to bootloader\n");
 	printf("====================================================\n");
 

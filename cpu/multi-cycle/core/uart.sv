@@ -16,7 +16,10 @@ module uart #(
 
 	//serial pins
 	input  logic        rx,
-	output logic        tx
+	output logic        tx,
+
+	//interrupt status
+	output logic        rx_avail
 );
 	localparam int          CLKS_PER_BIT = CLK_FREQ / BAUD;
 	localparam logic [15:0] HALF_BIT_CNT = 16'((CLKS_PER_BIT / 2) - 1);
@@ -136,6 +139,7 @@ module uart #(
 	logic [7:0] rx_head_byte;
 
 	assign rx_empty       = (rx_count == '0);
+	assign rx_avail       = ~rx_empty;
 	assign rx_full        = (rx_count == RX_DEPTH_MAX);
 	assign rx_push_req    = (rx_state == RX_STOP) && (rx_clk_cnt == FULL_BIT_CNT) && (rx_sync_2 == 1'b1);
 	assign rx_pop_req     = re && (addr == 4'h0) && !rx_empty;

@@ -44,6 +44,19 @@ char bsp_try_getc(void) {
   return (char)(*KEY_DATA & 0xFFU);
 }
 
+uint64_t bsp_time_us(void) { return 0ULL; }
+uint32_t bsp_time_ms(void) { return 0U; }
+void bsp_delay_us(uint32_t us) { (void)us; }
+void bsp_delay_ms(uint32_t ms) { (void)ms; }
+void bsp_timer_set_cmp(uint64_t cmp) { (void)cmp; }
+void bsp_timer_set_relative_us(uint64_t delta_us) { (void)delta_us; }
+void bsp_timer_disable(void) {}
+void bsp_irq_enable(uint32_t mask) { (void)mask; }
+void bsp_irq_disable(uint32_t mask) { (void)mask; }
+uint32_t bsp_irq_pending(void) { return 0U; }
+void bsp_irq_clear(uint32_t mask) { (void)mask; }
+void bsp_soft_reset(void) { bsp_exit(); }
+
 void bsp_exit(void) {
   *PAGE_REG = 0;
   void (*wozmon_entry)(void) = (void (*)(void))0x00000000;

@@ -293,7 +293,7 @@ int main(void) {
         bsp_puts("[Structure Preset Loaded & Paused]\n");
       } else if (key == 'q' || key == 'Q' || key == 27) { // 27 = ESC
         running = 0;
-        bsp_puts("[Exiting to Wozmon...]\n");
+        bsp_puts("[Exiting to Bootloader...]\n");
         break;
       }
     }
@@ -311,8 +311,7 @@ int main(void) {
     bsp_present_page((int)back_page);
     active_page = back_page;
 
-    for (volatile int delay = 0; delay < 30000; delay++)
-      ;
+    bsp_delay_ms(20);
   }
 
   bsp_exit();

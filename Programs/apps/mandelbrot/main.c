@@ -481,6 +481,6 @@ int main(void) {
     }
   }
 
-  bsp_set_page(0);
+  bsp_exit();
   return 0;
 }

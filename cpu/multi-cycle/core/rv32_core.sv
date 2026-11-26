@@ -11,7 +11,12 @@ module rv32_core #(
 	output logic [3:0]  mem_wstrb,
 	output logic [31:0] mem_addr,
 	output logic [31:0] mem_wdata,
-	input  logic [31:0] mem_rdata
+	input  logic [31:0] mem_rdata,
+
+	//hardware timer & interrupt sources
+	input  logic [63:0] mtime_i,
+	input  logic        timer_irq_i,
+	input  logic        ext_irq_i
 );
 	//internal fsm to datapath controls
 	mem_addr_src_t mem_addr_src;
@@ -54,6 +59,8 @@ module rv32_core #(
 	logic          inst_misaligned;
 	logic          load_misaligned;
 	logic          store_misaligned;
+	logic          irq_take;
+	logic [31:0]   irq_cause;
 	logic          mul_done;
 	logic          div_done;
 
@@ -81,6 +88,8 @@ module rv32_core #(
 		.inst_misaligned  (inst_misaligned),
 		.load_misaligned  (load_misaligned),
 		.store_misaligned (store_misaligned),
+		.irq_take         (irq_take),
+		.irq_cause        (irq_cause),
 		.mem_we       (fsm_mem_we),
 		.mem_req      (fsm_mem_req),
 		.mem_addr_src (mem_addr_src),
@@ -139,6 +148,9 @@ module rv32_core #(
 		.mem_wdata    (mem_wdata),
 		.mem_wbe      (dp_mem_wbe),
 		.mem_rdata    (mem_rdata),
+		.mtime_i      (mtime_i),
+		.timer_irq_i  (timer_irq_i),
+		.ext_irq_i    (ext_irq_i),
 		.opcode           (opcode),
 		.funct3           (funct3),
 		.funct7           (funct7),
@@ -152,6 +164,8 @@ module rv32_core #(
 		.inst_misaligned  (inst_misaligned),
 		.load_misaligned  (load_misaligned),
 		.store_misaligned (store_misaligned),
+		.irq_take         (irq_take),
+		.irq_cause        (irq_cause),
 		.mul_done     (mul_done),
 		.div_done     (div_done)
 	);

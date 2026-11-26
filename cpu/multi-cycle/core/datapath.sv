@@ -36,6 +36,11 @@ module datapath #(
 	output logic [3:0] mem_wbe,
 	input logic [31:0] mem_rdata,
 
+	//hardware timer & interrupt sources
+	input logic [63:0] mtime_i,
+	input logic timer_irq_i,
+	input logic ext_irq_i,
+
 	//to fsm
 	output opcode_t opcode,
 	output logic [2:0] funct3,
@@ -50,6 +55,8 @@ module datapath #(
 	output logic inst_misaligned,
 	output logic load_misaligned,
 	output logic store_misaligned,
+	output logic irq_take,
+	output logic [31:0] irq_cause,
 	output logic mul_done,
 	output logic div_done
 );
@@ -341,9 +348,14 @@ module datapath #(
 		.trap_pc_base (pc[31:2]),
 		.trap_cause   (trap_cause),
 		.trap_val     (trap_val),
+		.mtime_i      (mtime_i),
+		.timer_irq_i  (timer_irq_i),
+		.ext_irq_i    (ext_irq_i),
 		.rdata        (csr_result),
 		.mtvec_out    (mtvec_out),
 		.mepc_out     (mepc_out),
-		.illegal_csr  (csr_illegal)
+		.illegal_csr  (csr_illegal),
+		.irq_take     (irq_take),
+		.irq_cause    (irq_cause)
 	);
 endmodule

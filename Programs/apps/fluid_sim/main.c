@@ -646,7 +646,7 @@ int main(void) {
   print_string("  [+]/[-] Increase / Decrease Wind Speed\n");
   print_string("  [H]     Toggle On-Screen Help Menu\n");
   print_string("  [R]     Reset Simulation Field\n");
-  print_string("  [ESC/Q] Exit to Wozmon ROM\n");
+  print_string("  [ESC/Q] Exit to Bootloader\n");
   print_string("=====================================================\n");
 
   clear_page(0, COLOR_WHITE);
@@ -749,7 +749,7 @@ int main(void) {
     active_page = back_page;
   }
 
-  print_string("\nReturning to Wozmon ROM...\n");
+  print_string("\nReturning to Bootloader...\n");
   bsp_exit();
 
   return 0;

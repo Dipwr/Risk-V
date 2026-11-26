@@ -72,7 +72,7 @@ SRCS_C=(
 
 OBJS=()
 echo "=================================================="
-echo " Building FreeRTOS V11.1.0 Cooperative Demo"
+echo " Building FreeRTOS V11.1.0 Preemptive Demo"
 echo " ISA:    ${TARGET_MARCH}"
 echo " Output: ${OUT_DIR}"
 echo "=================================================="

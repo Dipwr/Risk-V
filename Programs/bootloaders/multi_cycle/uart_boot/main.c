@@ -1,15 +1,24 @@
 #include <stdint.h>
 
-#define UART_DATA ((volatile uint32_t *)0x20000000U)
-#define UART_STAT ((volatile uint32_t *)0x20000004U)
-#define PAGE_REG  ((volatile uint32_t *)0x20000008U)
-#define VRAM_P0   ((volatile uint16_t *)0x10000000U)
+#define UART_DATA   ((volatile uint32_t *)0x20000000U)
+#define UART_STAT   ((volatile uint32_t *)0x20000004U)
+#define PAGE_REG    ((volatile uint32_t *)0x20000008U)
+#define MTIME_LO    ((volatile uint32_t *)0x02000000U)
+#define MTIME_HI    ((volatile uint32_t *)0x02000004U)
+#define MTIMECMP_LO ((volatile uint32_t *)0x02000008U)
+#define MTIMECMP_HI ((volatile uint32_t *)0x0200000CU)
+#define IRQ_EN      ((volatile uint32_t *)0x02000010U)
+#define IRQ_PEND    ((volatile uint32_t *)0x02000014U)
+#define IRQ_VBLANK  (1U << 1)
+#define VRAM_P0     ((volatile uint16_t *)0x10000000U)
 
 #define SCREEN_W 320
 #define SCREEN_H 200
 
 #define USER_RAM_BASE 0x00002000U
 #define USER_RAM_END  0x00040000U
+
+#define RX_BYTE_TIMEOUT_US 2000000ULL
 
 #define UART_RX_READY (1U << 0)
 #define UART_TX_READY (1U << 1)
@@ -136,18 +145,44 @@ static void uart_puts(const char *s) {
 	}
 }
 
+static uint64_t mtime_us(void) {
+	uint32_t hi0, lo, hi1;
+	do {
+		hi0 = *MTIME_HI;
+		lo  = *MTIME_LO;
+		hi1 = *MTIME_HI;
+	} while (hi0 != hi1);
+	return ((uint64_t)hi0 << 32) | (uint64_t)lo;
+}
+
 static uint8_t uart_getc(void) {
 	while (!(*UART_STAT & UART_RX_READY)) {
 	}
 	return (uint8_t)(*UART_DATA & 0xFFU);
 }
 
-static uint32_t uart_read_u32(void) {
-	uint32_t b0 = uart_getc();
-	uint32_t b1 = uart_getc();
-	uint32_t b2 = uart_getc();
-	uint32_t b3 = uart_getc();
-	return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+static int uart_getc_timeout(uint64_t timeout_us, uint8_t *out) {
+	uint64_t start = mtime_us();
+	while (!(*UART_STAT & UART_RX_READY)) {
+		if ((mtime_us() - start) >= timeout_us) {
+			return 0;
+		}
+	}
+	*out = (uint8_t)(*UART_DATA & 0xFFU);
+	return 1;
+}
+
+static int uart_read_u32_timeout(uint32_t *out) {
+	uint32_t val = 0;
+	for (uint32_t i = 0; i < 4U; ++i) {
+		uint8_t b = 0;
+		if (!uart_getc_timeout(RX_BYTE_TIMEOUT_US, &b)) {
+			return 0;
+		}
+		val |= ((uint32_t)b) << (i * 8U);
+	}
+	*out = val;
+	return 1;
 }
 
 static void uart_wait_tx_idle(void) {
@@ -227,6 +262,13 @@ static void draw_boot_screen(void) {
 	reset_progress_bar();
 }
 
+static void abort_rx(char code, const char *msg) {
+	uart_flush_rx();
+	set_status(msg, C_RED);
+	uart_putc(PROTO_NAK);
+	uart_putc((uint8_t)code);
+}
+
 static void jump_to(uint32_t addr) {
 	uart_wait_tx_idle();
 	void (*entry)(void) = (void (*)(void))addr;
@@ -234,6 +276,13 @@ static void jump_to(uint32_t addr) {
 }
 
 void boot_main(void) {
+	/* Defensive cleanup in case a program returned here without SYS_RESET */
+	__asm__ volatile("csrci mstatus, 8\n\tcsrw mie, zero" ::: "memory");
+	*IRQ_EN = 0U;
+	*IRQ_PEND = IRQ_VBLANK;
+	*MTIMECMP_LO = 0xFFFFFFFFU;
+	*MTIMECMP_HI = 0xFFFFFFFFU;
+
 	*PAGE_REG = 0U;
 	uart_flush_rx();
 	draw_boot_screen();
@@ -246,31 +295,39 @@ void boot_main(void) {
 
 		if (magic == 0x5256424CU) { /* "RVBL" */
 			magic = 0;
-			uint32_t load_addr    = uart_read_u32();
-			uint32_t size         = uart_read_u32();
-			uint32_t expected_crc = uart_read_u32();
+			uint32_t load_addr    = 0;
+			uint32_t size         = 0;
+			uint32_t expected_crc = 0;
+			if (!uart_read_u32_timeout(&load_addr) ||
+			    !uart_read_u32_timeout(&size) ||
+			    !uart_read_u32_timeout(&expected_crc)) {
+				abort_rx('T', "ERROR: RX TIMEOUT");
+				continue;
+			}
 
 			if (load_addr < USER_RAM_BASE || load_addr >= USER_RAM_END ||
 			    (load_addr & 3U) != 0U || size == 0U ||
 			    size > (USER_RAM_END - load_addr)) {
-				uart_putc(PROTO_NAK);
-				uart_putc('B');
-				set_status("ERROR: BAD HEADER", C_RED);
-				uart_flush_rx();
+				abort_rx('B', "ERROR: BAD HEADER");
 				continue;
 			}
 
-			*UART_STAT = UART_RX_OVR | UART_RX_FRM;
-			uart_putc(PROTO_ACK);
 			set_status("RECEIVING BINARY...", C_CYAN);
 			reset_progress_bar();
+			*UART_STAT = UART_RX_OVR | UART_RX_FRM;
+			uart_putc(PROTO_ACK);
 
 			volatile uint8_t *dst = (volatile uint8_t *)load_addr;
 			uint32_t crc = 0xFFFFFFFFU;
 			uint32_t prev_col = 0;
+			int rx_timed_out = 0;
 
 			for (uint32_t i = 0; i < size; ++i) {
-				uint8_t rx_byte = uart_getc();
+				uint8_t rx_byte = 0;
+				if (!uart_getc_timeout(RX_BYTE_TIMEOUT_US, &rx_byte)) {
+					rx_timed_out = 1;
+					break;
+				}
 				dst[i] = rx_byte;
 				crc = crc32_step(crc, rx_byte);
 
@@ -281,41 +338,40 @@ void boot_main(void) {
 					prev_col = col;
 				}
 			}
+			if (rx_timed_out) {
+				abort_rx('T', "ERROR: RX TIMEOUT");
+				continue;
+			}
 			crc ^= 0xFFFFFFFFU;
 
 			uint32_t stat = *UART_STAT;
 			if (stat & (UART_RX_OVR | UART_RX_FRM)) {
-				uart_putc(PROTO_NAK);
-				uart_putc('U');
-				set_status("ERROR: UART OVERRUN/FRAMING", C_RED);
-				uart_flush_rx();
+				abort_rx('U', "ERROR: UART OVERRUN/FRAMING");
 				continue;
 			}
 
 			if (crc != expected_crc) {
-				uart_putc(PROTO_NAK);
-				uart_putc('C');
-				set_status("ERROR: CRC32 MISMATCH", C_RED);
-				uart_flush_rx();
+				abort_rx('C', "ERROR: CRC32 MISMATCH");
 				continue;
 			}
 
-			uart_putc(PROTO_ACK);
 			set_status("CRC OK - BOOTING...", C_GREEN);
+			uart_putc(PROTO_ACK);
 			jump_to(load_addr);
 		} else if (magic == 0x5256474FU) { /* "RVGO" */
 			magic = 0;
-			uint32_t entry_addr = uart_read_u32();
-			if (entry_addr < USER_RAM_BASE || entry_addr >= USER_RAM_END ||
-			    (entry_addr & 3U) != 0U) {
-				uart_putc(PROTO_NAK);
-				uart_putc('B');
-				set_status("ERROR: BAD JUMP ADDR", C_RED);
-				uart_flush_rx();
+			uint32_t entry_addr = 0;
+			if (!uart_read_u32_timeout(&entry_addr)) {
+				abort_rx('T', "ERROR: RX TIMEOUT");
 				continue;
 			}
-			uart_putc(PROTO_ACK);
+			if (entry_addr < USER_RAM_BASE || entry_addr >= USER_RAM_END ||
+			    (entry_addr & 3U) != 0U) {
+				abort_rx('B', "ERROR: BAD JUMP ADDR");
+				continue;
+			}
 			set_status("BOOTING PRELOADED IMAGE...", C_GREEN);
+			uart_putc(PROTO_ACK);
 			jump_to(entry_addr);
 		}
 	}

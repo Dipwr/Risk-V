@@ -6,6 +6,7 @@
 
 #define UART_RX_READY   (1U << 0)
 #define UART_TX_READY   (1U << 1)
+#define UART_TX_IDLE    (1U << 4)
 #define VGA_NO_VSYNC_W  (1U << 1)
 #define VGA_VBLANK      (1U << 1)
 #define VGA_ACTIVE_PAGE (1U << 2)
@@ -69,11 +70,69 @@ char bsp_try_getc(void) {
   return (char)(*UART_DATA & 0xFFU);
 }
 
-void bsp_exit(void) {
-  g_no_vsync = 0;
-  *PAGE_REG = 0;
-  void (*wozmon_entry)(void) = (void (*)(void))0x00000000;
-  wozmon_entry();
+uint64_t bsp_time_us(void) {
+  uint32_t hi0, lo, hi1;
+  do {
+    hi0 = *BSP_MTIME_HI;
+    lo  = *BSP_MTIME_LO;
+    hi1 = *BSP_MTIME_HI;
+  } while (hi0 != hi1);
+  return ((uint64_t)hi0 << 32) | (uint64_t)lo;
+}
+
+uint32_t bsp_time_ms(void) {
+  return (uint32_t)(bsp_time_us() / 1000ULL);
+}
+
+void bsp_delay_us(uint32_t us) {
+  uint64_t start = bsp_time_us();
+  while ((bsp_time_us() - start) < (uint64_t)us)
+    ;
+}
+
+void bsp_delay_ms(uint32_t ms) {
+  uint64_t start = bsp_time_us();
+  uint64_t wait  = (uint64_t)ms * 1000ULL;
+  while ((bsp_time_us() - start) < wait)
+    ;
+}
+
+void bsp_timer_set_cmp(uint64_t cmp) {
+  *BSP_MTIMECMP_LO = 0xFFFFFFFFU;
+  *BSP_MTIMECMP_HI = (uint32_t)(cmp >> 32);
+  *BSP_MTIMECMP_LO = (uint32_t)(cmp & 0xFFFFFFFFU);
+}
+
+void bsp_timer_set_relative_us(uint64_t delta_us) {
+  bsp_timer_set_cmp(bsp_time_us() + delta_us);
+}
+
+void bsp_timer_disable(void) {
+  *BSP_MTIMECMP_LO = 0xFFFFFFFFU;
+  *BSP_MTIMECMP_HI = 0xFFFFFFFFU;
+}
+
+void bsp_irq_enable(uint32_t mask) { *BSP_IRQ_EN |= mask; }
+
+void bsp_irq_disable(uint32_t mask) { *BSP_IRQ_EN &= ~mask; }
+
+uint32_t bsp_irq_pending(void) { return *BSP_IRQ_PEND; }
+
+void bsp_irq_clear(uint32_t mask) { *BSP_IRQ_PEND = mask; }
+
+void bsp_soft_reset(void) {
+  while (!(*UART_STAT & UART_TX_IDLE))
+    ;
+  *BSP_SYS_RESET = BSP_SYS_RESET_KEY;
   while (1)
     ;
+}
+
+void bsp_exit(void) {
+  __asm__ volatile("csrci mstatus, 8\n\tcsrw mie, zero" ::: "memory");
+  bsp_timer_disable();
+  *BSP_IRQ_EN = 0U;
+  g_no_vsync = 0;
+  *PAGE_REG = 0;
+  bsp_soft_reset();
 }

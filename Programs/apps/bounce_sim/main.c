@@ -314,7 +314,7 @@ int main(void) {
     active_page = back_page;
   }
 
-  bsp_puts("[RV32IM Core] Exiting, returning control to Wozmon.\n");
-  bsp_set_page(0);
+  bsp_puts("[RV32IM Core] Exiting, returning control to bootloader.\n");
+  bsp_exit();
   return 0;
 }

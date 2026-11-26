@@ -21,6 +21,8 @@ module control_fsm (
     input logic inst_misaligned,
     input logic load_misaligned,
     input logic store_misaligned,
+    input logic irq_take,
+    input logic [31:0] irq_cause,
 
     //outputs to BRAM
     output logic mem_we,
@@ -73,7 +75,15 @@ module control_fsm (
             case (fsm_state)
                 STATE_RESET: fsm_state <= STATE_FETCH;
 
-                STATE_FETCH: fsm_state <= STATE_DECODE;
+                STATE_FETCH: begin
+                    if (irq_take) begin
+                        fsm_state      <= STATE_TRAP;
+                        trap_cause_q   <= irq_cause;
+                        trap_val_src_q <= TRAP_VAL_ZERO;
+                    end else begin
+                        fsm_state      <= STATE_DECODE;
+                    end
+                end
 
                 STATE_DECODE: begin
                     case (dec_opcode)

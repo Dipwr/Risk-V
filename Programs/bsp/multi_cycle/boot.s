@@ -24,8 +24,7 @@ _start:
 	# 4. Call C main entry point
 	call main
 
-	# 5. If main returns: reset display to Page 0 and jump directly to Wozmon ROM
-	li   t0, 0x20000008     # PAGE_REG MMIO address in Phase 2 Multi-Cycle SoC
-	sw   zero, 0(t0)        # Switch display back to Page 0
-	li   t1, 0x00000000     # Wozmon Boot ROM Entry Address
-	jr   t1                 # Jump to Wozmon!
+	# 5. If main returns: clean exit via BSP HAL (disables IRQs, resets page, triggers SYS_RESET)
+	call bsp_exit
+3:
+	j    3b

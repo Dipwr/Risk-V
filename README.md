@@ -73,10 +73,16 @@ The primary goal of **Risk-V** is to build a complete, self-contained RISC-V com
 | System RAM (BRAM)    | 0x0000_0000  | 0x0003_FFFF  | 256 KB | Boot/Code      |
 |   UART Bootloader    | 0x0000_0000  | 0x0000_1FFF  | 8 KB   | Binary RVBL    |
 |   User Program Area  | 0x0000_2000  | 0x0003_FFFF  | 248 KB | Apps/Stack     |
+| Internal IO (CLINT)  | 0x0200_0000  | 0x0200_00FF  | 256 B  | Core-Local IO  |
+|   MTIME_LO / HI      | 0x0200_0000  | 0x0200_0004  | 8 B    | 64-bit 1 MHz us counter (RW) |
+|   MTIMECMP_LO / HI   | 0x0200_0008  | 0x0200_000C  | 8 B    | 64-bit MTI compare reg (RW) |
+|   IRQ_EN             | 0x0200_0010  |              | 4 B    | MEI enable: [0]uart_rx [1]vblank (RW) |
+|   IRQ_PEND           | 0x0200_0014  |              | 4 B    | MEI pending: [0]uart_rx(RO) [1]vblank(W1C) |
+|   SYS_RESET          | 0x0200_001C  |              | 4 B    | Write `0x52535401` for sync soft reset (WO) |
 | Video RAM (VRAM)     | 0x1000_0000  | 0x1003_FFFF  | 256 KB | Dual-Port      |
 |   Framebuffer Page 0 | 0x1000_0000  | 0x1001_FFFF  | 128 KB | 320x200 RGB565 |
 |   Framebuffer Page 1 | 0x1002_0000  | 0x1003_FFFF  | 128 KB | 320x200 RGB565 |
-| Peripheral MMIO      | 0x2000_0000  | 0x2000_00FF  | 256 B  | Strict Decode  |
+| External IO (Periphs)| 0x2000_0000  | 0x2000_00FF  | 256 B  | Strict Decode  |
 |   UART Data (TX/RX)  | 0x2000_0000  |              | 4 B    | R: RX pop / W: TX push |
 |   UART Status / Ctrl | 0x2000_0004  |              | 4 B    | R:[0]rx_rdy [1]tx_rdy [2]ovr [3]frm [4]tx_idle |
 |                      |              |              |        | W:[2]clr_ovr [3]clr_frm [4]rx_flush |
@@ -120,11 +126,11 @@ The multi-cycle core (`rv32_core.sv`) decouples control (`control_fsm.sv`) from 
         +--------------------------------+
 ```
 
-- **Instruction Fetch (`STATE_FETCH`)**: Asserts `mem_req` with `mem_addr = pc`.
+- **Instruction Fetch (`STATE_FETCH`)**: Asserts `mem_req` with `mem_addr = pc`, and samples `irq_take` (`mstatus.MIE && ((mie.MEIE && ext_irq) || (mie.MTIE && timer_irq))`) to enter `STATE_TRAP` with `mcause = 32'h8000_0007` (MTI) or `32'h8000_000B` (MEI) before latching the next instruction.
 - **Instruction Decode & Register Fetch (`STATE_DECODE`)**: Latches `ir <= mem_rdata`, reads `regfile` (`RAM32M`, no runtime reset) into `reg_a`/`reg_b`, computes `pc_4 = pc + 4` via `u_alu`, and selects the next FSM state from live `dec_opcode`/`dec_funct3`/`dec_funct7`/`dec_funct12`/`dec_rs1_zero`/`dec_rd_zero` (routing `ECALL`, `EBREAK`, and illegal encodings to `STATE_TRAP` and `MRET` to `STATE_MRET`).
 - **PC-Relative / Upper-Immediate / Branch (`STATE_IMM_PC`)**: Completes `BRANCH` (using 3 shared base comparators for `BEQ`/`BNE`/`BLT`/`BGE`/`BLTU`/`BGEU`), `JAL` (with misaligned target detection), `LUI`, `AUIPC`, and `FENCE`/`PAUSE` NOPs.
 - **Execute (`STATE_EXECUTE`)**: Single-cycle RV32I ALU operations (`alu.sv`, 10 ops).
-- **CSR Access (`STATE_CSR`)**: Dedicated `csr_unit.sv` — single-cycle atomic RMW execution (`CSRRW`/`CSRRS`/`CSRRC`/`CSRRWI`/`CSRRSI`/`CSRRCI`, 3 cycles total) with `rd == x0` / `rs1 == x0` / `zimm == 0` side-effect suppression, 64-bit `cycle`/`time`/`instret` counters (`0xC00`–`0xC82`), writable `mcycle`/`minstret` aliases (`0xB00`–`0xB82`), M-mode trap CSRs (`mstatus`, `mtvec`, `mscratch`, `mepc`, `mcause`, `mtval`), and hardwired `misa`/`mvendorid`/`marchid`/`mimpid`/`mhartid`, with illegal/read-only CSR trap detection.
+- **CSR Access (`STATE_CSR`)**: Dedicated `csr_unit.sv` — single-cycle atomic RMW execution (`CSRRW`/`CSRRS`/`CSRRC`/`CSRRWI`/`CSRRSI`/`CSRRCI`, 3 cycles total) with `rd == x0` / `rs1 == x0` / `zimm == 0` side-effect suppression, 64-bit `cycle`/`instret` counters (`0xC00`/`0xC02` + `0xC80`/`0xC82`), `time`/`timeh` (`0xC01`/`0xC81`) mirroring CLINT `mtime`, writable `mcycle`/`minstret` aliases (`0xB00`–`0xB82`), M-mode trap & interrupt CSRs (`mstatus`, `mie`, `mtvec`, `mscratch`, `mepc`, `mcause`, `mtval`, `mip`), and hardwired `misa`/`mvendorid`/`marchid`/`mimpid`/`mhartid`, with illegal/read-only CSR trap detection.
 - **Trap & Return (`STATE_TRAP`, `STATE_MRET`)**: Synchronous M-mode exception handling for `ECALL`, `EBREAK`, illegal instructions/CSRs, and misaligned instruction/load/store addresses (suppressing side effects and `instret`), plus `MRET` state restoration (`MIE <= MPIE`, `pc <= mepc`).
 - **Multiply (`STATE_MUL`)**: Dedicated `mul_unit.sv` — 4-stage `en`-gated `DSP48E1` pipeline (`a_ext_q`/`b_ext_q` + `s1..s3_prod`), completing `MUL`/`MULH`/`MULHSU`/`MULHU` in 5 cycles in `STATE_MUL` (7 cycles total).
 - **Divide (`STATE_DIV`)**: Dedicated `div_unit.sv` — 32-step restoring binary divider with a shared post-negator and 2-cycle fast-paths for divide-by-zero and signed `-2^31 / -1` overflow (34 cycles normal in `STATE_DIV`).
@@ -135,13 +141,13 @@ The multi-cycle core (`rv32_core.sv`) decouples control (`control_fsm.sv`) from 
 ## 💻 Software & Ecosystem
 
 ### 1. Bootloaders (`uart_boot` & Wozmon)
-- **Phase 2 Binary UART Bootloader (`Programs/bootloaders/multi_cycle/uart_boot/`)**: Compact (< 3 KB) bare-metal binary loader occupying the lower 8 KB of BRAM (`0x0000_0000`–`0x0000_1FFF`), leaving **248 KB** (`0x0000_2000`–`0x0003_FFFF`) for user programs. Supports framed binary transfers (`RVBL` + `addr` + `size` + IEEE 802.3 CRC32 + `ACK`/`NAK`), fast preloaded jump (`RVGO` + `addr`), and a 320×200 VGA status/progress bar. Driven from the host via `Programs/tools/upload.py`.
+- **Phase 2 Binary UART Bootloader (`Programs/bootloaders/multi_cycle/uart_boot/`)**: Compact (< 4 KB) bare-metal binary loader occupying the lower 8 KB of BRAM (`0x0000_0000`–`0x0000_1FFF`), leaving **248 KB** (`0x0000_2000`–`0x0003_FFFF`) for user programs. Supports framed binary transfers (`RVBL` + `addr` + `size` + IEEE 802.3 CRC32 + `ACK`/`NAK`), CLINT `mtime`-based RX transfer timeout recovery (`NAK 'T'`), defensive CSR/IRQ cleanup at entry, fast preloaded jump (`RVGO` + `addr`), and a 320×200 VGA status/progress bar. Driven from the host via `Programs/tools/upload.py`.
 - **Phase 1 Wozmon Monitor (`Programs/bootloaders/single_cycle/`)**: Interactive hex monitor/loader in RV32I assembly for the Phase 1 single-cycle simulator.
 
 ### 2. Multi-Target BSP & Bare-Metal C Toolchain
 - **Compiler**: Standard RISC-V GCC toolchain (`riscv-none-elf-gcc`, `riscv64-unknown-elf-gcc`, etc.) with `-mabi=ilp32 -O2` and per-target `-march` configured via `TARGET_MARCH` in `Programs/bsp/<target>/target.env` (`rv32im_zicsr_zicntr` for `multi_cycle`, `rv32im` for `single_cycle`).
 - **Target BSPs (`Programs/bsp/`)**:
-  - `bsp/include/bsp.h`: Unified HAL API (`bsp_vram_page`, `bsp_set_page`, `bsp_set_vsync`, `bsp_vblank`, `bsp_active_page`, `bsp_wait_vblank`, `bsp_present_page`, `bsp_putc`, `bsp_puts`, `bsp_key_avail`, `bsp_getc`, `bsp_try_getc`, `bsp_exit`) abstracting memory maps, VRAM page strides (`64000` vs `65536` pixels), VSync/active-page handoff, and console/UART I/O.
+  - `bsp/include/bsp.h`: Unified HAL API (`bsp_vram_page`, `bsp_set_page`, `bsp_set_vsync`, `bsp_vblank`, `bsp_active_page`, `bsp_wait_vblank`, `bsp_present_page`, `bsp_putc`, `bsp_puts`, `bsp_key_avail`, `bsp_getc`, `bsp_try_getc`, `bsp_time_us`, `bsp_time_ms`, `bsp_delay_us`, `bsp_delay_ms`, `bsp_timer_set_cmp`, `bsp_timer_set_relative_us`, `bsp_timer_disable`, `bsp_irq_enable`, `bsp_irq_disable`, `bsp_irq_pending`, `bsp_irq_clear`, `bsp_soft_reset`, `bsp_exit`) abstracting memory maps, VRAM page strides (`64000` vs `65536` pixels), VSync/active-page handoff, CLINT timer & MEI helpers, and console/UART I/O.
   - `bsp/single_cycle/`: Phase 1 target (`0x0004_0000` RAM, `0x0008_2000` VRAM, `TERM_OUT`/`KEY_*` MMIO, Wozmon load `40000`).
   - `bsp/multi_cycle/`: Phase 2 target (`0x0000_2000` RAM, 248 KB, `0x1000_0000` VRAM, polling UART + VBlank `PAGE_REG`, `upload.py` load `0x00002000`).
 - **Syscalls**: Target-agnostic Newlib-nano bridge (`Programs/lib/syscalls.c`) delegating `_write`, `_read`, `_sbrk`, and `_exit` to the active BSP HAL and linker symbols (`_end`, `_heap_limit`).
@@ -156,12 +162,14 @@ All applications under `Programs/apps/` build against both `single_cycle` and `m
 - `GoL`: Conway's Game of Life.
 - `bounce_sim`: Multi-ball Q16.16 physics simulation.
 - `dvd_bounce`: Double-buffered bouncing box test.
+- `chronometer`: Interactive VGA & UART stopwatch exercising the 1 MHz CLINT timer (`mtime`/`mtimecmp`), 100 Hz Machine Timer Interrupts (`MTI`), lap timing, and `time`/`timeh` CSRs.
+- `freq_meter`: Precision CPU clock frequency (`Hz`/`MHz`) and instruction retirement rate (`IPS`/`MIPS`, `IPC`/`CPI`) meter using edge-aligned `time`, `cycle`, and `instret` CSRs plus on-demand 60-frame VGA VBlank cross-clock verification.
 - `profiler_workload`: PGO and simulator benchmark combining 3D rotation and procedural rendering.
 - `riscv-compliance` (`Programs/riscv-compliance/build_compliance.sh`, Phase 2 target): Bare-metal visual runner for 58 official `riscv-tests` ISA compliance tests (`rv32ui` 40, `rv32um` 8, `rv32mi` 10) with live VGA tile grid and `cycle`-CSR timing.
 
 Additional Phase 2 (`multi_cycle`) suites built with on-demand upstream sources (`Programs/third_party/`, gitignored):
 - **RISC-V Official Compliance (`Programs/riscv-compliance/`)**: Visual 58-test `riscv-tests` runner (`rv32ui`, `rv32um`, `rv32mi`).
-- **Cooperative FreeRTOS (`Programs/freertos_demo/`)**: Upstream `FreeRTOS-Kernel` V11.1.0 (`portable/GCC/RISC-V`) running 3 concurrent tasks (`vAnimTask`, `vTelemetryTask`, `vConsoleTask`) with `ECALL`/`MRET` yields, FreeRTOS queues, VGA animation + HUD, and UART telemetry.
+- **Preemptive FreeRTOS (`Programs/freertos_demo/`)**: Upstream `FreeRTOS-Kernel` V11.1.0 (`portable/GCC/RISC-V`) running 3 concurrent tasks (`vAnimTask`, `vTelemetryTask`, `vConsoleTask`) with preemptive CLINT Machine Timer Interrupts (`1000 Hz` tick, `vTaskDelay()`, blocking `xQueueReceive()`), VGA animation + HUD, and UART telemetry.
 - **CPU Benchmarks (`Programs/benchmarks/`)** (measured at `-O2`, 84 MHz target clock):
   - **EEMBC CoreMark (`coremark/`)**: `0.9681 CoreMark/MHz` (`81.32 CoreMark @ 84 MHz`, Avg CPI `3.293`, verified with 50 iterations; pass `--iterations 2000` for an official ≥10 s FPGA run).
   - **Dhrystone 2.2 (`dhrystone/`)**: `0.4391 DMIPS/MHz` (`36.88 DMIPS @ 84 MHz`, Avg CPI `3.357` over 500 runs).
@@ -194,7 +202,8 @@ Risk-V/
 │       │   ├── mul_unit.sv        # 4-stage en-gated DSP48E1 RV32M multiplier
 │       │   ├── div_unit.sv        # 32-step restoring RV32M divider
 │       │   ├── imm_gen.sv         # Immediate decoder (I, S, B, U, J types)
-│       │   ├── soc_top.sv         # SoC interconnect, BRAM, VRAM, MMIO & CDC
+│       │   ├── soc_top.sv         # SoC interconnect, BRAM, VRAM, Internal/External MMIO & CDC
+│       │   ├── clint_timer.sv     # Core-local 64-bit 1 MHz mtime/mtimecmp timer & MTI comparator
 │       │   ├── bram_ram.sv        # 256 KB internal program Block RAM
 │       │   ├── vram.sv            # 256 KB dual-port video RAM
 │       │   ├── vga_controller.sv  # 1280x800 @ 60Hz tear-free 4x upscaled VGA
@@ -204,7 +213,7 @@ Risk-V/
 │           ├── clk_wiz_0.sv       # Behavioral CPU Clocking Wizard stub for Verilator
 │           ├── clk_wiz_1.sv       # Behavioral VGA Clocking Wizard stub for Verilator
 │           ├── sim.vlt            # Verilator config exposing clock/RAM/VRAM hooks
-│           ├── gen_boot_mem.py    # Converts Wozmon .bin to 65536-word boot.mem
+│           ├── gen_boot_mem.py    # Converts uart_boot .bin to 65536-word boot.mem
 │           ├── sim_main.cpp       # SDL2 + bit-accurate UART PTY + dual-mode VGA harness
 │           └── Makefile           # Build, lint, PGO, and run targets
 └── Programs/
@@ -218,7 +227,7 @@ Risk-V/
     ├── apps/                      # Hardware-agnostic bare-metal tests & demos
     ├── benchmarks/                # CoreMark & Dhrystone 2.2 benchmark wrappers
     ├── bootloaders/               # uart_boot (multi_cycle), Wozmon (single_cycle) & asm demos
-    ├── freertos_demo/             # Cooperative FreeRTOS V11.1.0 VGA + UART demo
+    ├── freertos_demo/             # Preemptive FreeRTOS V11.1.0 (CLINT MTI) VGA + UART demo
     ├── riscv-compliance/          # Official riscv-tests visual runner (rv32ui/rv32um/rv32mi)
     ├── assets/3d/                 # 3D models (OBJ) and C array converter
     └── tools/                     # upload.py, bin2hex.py, paste.py, serialpaste.py
@@ -255,11 +264,11 @@ cd Programs
 The script compiles the application, packages it into `out/<target>/<app>/program.hex`, and copies the payload to your clipboard ready to paste into Wozmon (`10000: <paste> \n 10000r` for `multi_cycle`, or `40000:` / `40000r` for `single_cycle`; pass `--no-clip` for headless builds).
 
 ### 3. Running the Phase 2 Verilator Simulator (`arty_a7_top`)
-Supports both **Linux** (`verilator`, `libsdl2-dev`, `make`) and **macOS** (`brew install verilator sdl2`, plus a RISC-V GCC toolchain to assemble `boot.mem`). You can develop, boot Wozmon, upload programs over UART, and view VGA output identically to the Arty A7-100T without physical FPGA hardware:
+Supports both **Linux** (`verilator`, `libsdl2-dev`, `make`) and **macOS** (`brew install verilator sdl2`, plus a RISC-V GCC toolchain to build `boot.mem`). You can develop, run `uart_boot`, upload programs over UART, and view VGA output identically to the Arty A7-100T without physical FPGA hardware:
 
 ```bash
 cd cpu/multi-cycle/sim
-make -j$(nproc)      # Assembles visual_wozmon320x200.s -> boot.mem & builds Varty_a7_top (macOS: -j$(sysctl -n hw.ncpu))
+make -j$(nproc)      # Compiles uart_boot -> boot.mem & builds Varty_a7_top (macOS: -j$(sysctl -n hw.ncpu))
 make run             # Fast VGA mode (VRAM + 60 Hz VBlank cadence)
 make run-pin         # Pin-accurate VGA mode (83.46 MHz vga_hs/vga_vs/vga_r/g/b sampling)
 make strict          # Rebuild with --x-assign/initial unique to catch uninitialized FF/RAM bugs
@@ -308,11 +317,11 @@ Key simulator features:
   - [x] `Zicsr` CSR instructions & `Zicntr`/M-mode counter & info CSRs (`csr_unit.sv`, `STATE_CSR`).
   - [x] Trap/exception & M-mode privilege support (illegal-instruction/CSR & misaligned-address decode, `mstatus`/`mtvec`/`mepc`/`mcause`/`mtval`, `ECALL`/`EBREAK`/`MRET`, `STATE_TRAP`/`STATE_MRET`).
   - [x] Official `riscv-tests` compliance runner (`Programs/riscv-compliance/`: 58 tests across `rv32ui`, `rv32um`, and `rv32mi`).
-  - [x] Vivado bitstream synthesis & timing closure (84.0 MHz CPU / 83.46 MHz VGA with 0-cycle `eff_addr` bypass; `ALUOut`/`MDR` staging evaluated and skipped to preserve CPI).
-  - [x] Physical hardware bring-up and verification on Arty A7-100T silicon (`dvd_bounce`, `GoL`, `mandelbrot`, and 3D `wireframe` verified over UART + VGA) — Phase 2 base hardware RTL complete.
+  - [x] Vivado bitstream synthesis & timing closure (closed at 94.0 MHz CPU / 83.46 MHz VGA with 0-cycle `eff_addr` bypass and tuned Vivado synthesis/implementation strategies; `ALUOut`/`MDR` staging evaluated and skipped to preserve CPI).
+  - [x] Physical hardware bring-up and verification on Arty A7-100T silicon (`dvd_bounce`, `GoL`, `mandelbrot`, `wireframe`, `chronometer`, and `freq_meter` verified over UART + VGA at 94 MHz) — Phase 2 base hardware RTL complete.
   - [ ] VGA color depth & DAC hardware upgrade (wire physical 12-bit RGB444 resistor-ladder DAC on Pmod VGA; optional full 16-bit RGB565 output via temporal/spatial dithering or 16-pin DAC in `vga_controller.sv`).
-  - [x] Fast binary UART bootloader (`uart_boot`, CRC32 + VGA progress bar + `upload.py`, expanding user RAM to 248 KB), Cooperative FreeRTOS demo, and CoreMark/Dhrystone benchmarks.
-  - [ ] M-mode RTOS hardware upgrades (target >= 80–84 MHz): CLINT MMIO timer (`mtime`/`mtimecmp` + `MTI`), `mie`/`mip` CSRs, UART RX & VBlank `MEI` interrupts, `WFI`, lower-8 KB bootloader write-protect, and MMIO soft-reset/watchdog (`cpu/multi-cycle/TODO.md`).
+  - [x] Fast binary UART bootloader (`uart_boot`, CRC32 + VGA progress bar + `upload.py`, expanding user RAM to 248 KB), Preemptive FreeRTOS demo, and CoreMark/Dhrystone benchmarks.
+  - [ ] M-mode RTOS hardware upgrades (target >= 80–84 MHz): [x] CLINT MMIO timer (`mtime`/`mtimecmp` + `MTI` + `mie`/`mip` + `time`/`timeh`), [x] UART RX & VBlank `MEI` interrupts, [x] MMIO soft-reset (`SYS_RESET`), and [ ] `WFI` (`cpu/multi-cycle/TODO.md`; bootloader write-protect deferred to Phase 3).
 - [ ] **Phase 3: RV32IM 5-Stage Pipelined Core**
   - [ ] Pipeline stage registers (`IF/ID`, `ID/EX`, `EX/MEM`, `MEM/WB` register slices).
   - [ ] Hazard detection unit (load-use hazard detection, PC and `IF/ID` stall generation).

@@ -159,7 +159,7 @@ int main(void) {
   }
 
   bsp_set_vsync(1);
-  bsp_set_page(0);
   clear_buffer_page(0, COLOR_WHITE);
+  bsp_exit();
   return 0;
 }

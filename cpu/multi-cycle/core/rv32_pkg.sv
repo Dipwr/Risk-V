@@ -94,11 +94,13 @@ package rv32_pkg;
 	// Machine information & trap setup/handling CSRs
 	localparam logic [11:0] CSR_MSTATUS   = 12'h300;
 	localparam logic [11:0] CSR_MISA      = 12'h301;
+	localparam logic [11:0] CSR_MIE       = 12'h304;
 	localparam logic [11:0] CSR_MTVEC     = 12'h305;
 	localparam logic [11:0] CSR_MSCRATCH  = 12'h340;
 	localparam logic [11:0] CSR_MEPC      = 12'h341;
 	localparam logic [11:0] CSR_MCAUSE    = 12'h342;
 	localparam logic [11:0] CSR_MTVAL     = 12'h343;
+	localparam logic [11:0] CSR_MIP       = 12'h344;
 	localparam logic [11:0] CSR_MVENDORID = 12'hF11;
 	localparam logic [11:0] CSR_MARCHID   = 12'hF12;
 	localparam logic [11:0] CSR_MIMPID    = 12'hF13;
@@ -114,6 +116,10 @@ package rv32_pkg;
 	localparam logic [31:0] CAUSE_LOAD_MISALIGNED  = 32'd4;
 	localparam logic [31:0] CAUSE_STORE_MISALIGNED = 32'd6;
 	localparam logic [31:0] CAUSE_ECALL_M          = 32'd11;
+
+	// Machine interrupt cause codes (mcause[31] == 1)
+	localparam logic [31:0] CAUSE_IRQ_M_TIMER      = 32'h8000_0007;
+	localparam logic [31:0] CAUSE_IRQ_M_EXT        = 32'h8000_000B;
 
 	typedef enum logic [3:0] {
 		ALU_ADD,

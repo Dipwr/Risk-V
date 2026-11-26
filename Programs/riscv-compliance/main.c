@@ -317,9 +317,9 @@ int main(void) {
 	bsp_putc('/');
 	uart_print_dec(COMPLIANCE_TEST_COUNT);
 	bsp_puts(" PASSED ===\n");
-	bsp_puts("Press Q or Esc to return to Wozmon...\n");
+	bsp_puts("Press Q or Esc to return to Bootloader...\n");
 
-	/* Drain any stale bytes left in UART RX FIFO (e.g., trailing CR/LF from Wozmon) */
+	/* Drain any stale bytes left in UART RX FIFO (e.g., trailing CR/LF from bootloader/terminal) */
 	while (bsp_key_avail()) {
 		(void)bsp_getc();
 	}
@@ -332,5 +332,6 @@ int main(void) {
 			break;
 		}
 	}
+	bsp_exit();
 	return 0;
 }

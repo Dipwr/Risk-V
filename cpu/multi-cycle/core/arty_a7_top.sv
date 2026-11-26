@@ -1,7 +1,7 @@
 module arty_a7_top #(
 	parameter string       BOOT_HEX     = "boot.mem",
 	parameter logic [31:0] RESET_PC     = 32'h0000_0000,
-	parameter int          CPU_CLK_FREQ = 84_000_000,
+	parameter int          CPU_CLK_FREQ = 94_000_000,
 	parameter int          UART_BAUD    = 115_200
 )(
 	input  logic       CLK100MHZ,    // pin E3 (100 mhz crystal oscillator)

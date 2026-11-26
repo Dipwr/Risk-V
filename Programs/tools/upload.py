@@ -30,6 +30,7 @@ def read_ack_or_fail(ser: serial.Serial, stage: str) -> None:
 			"B": "bad header / address out of range",
 			"U": "UART RX overrun or framing error",
 			"C": "CRC32 mismatch",
+			"T": "UART RX timeout waiting for data",
 		}
 		raise RuntimeError(
 			f"{stage}: bootloader returned NAK ('{err_ch}': {reasons.get(err_ch, 'unknown error')})"

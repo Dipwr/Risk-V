@@ -980,9 +980,9 @@ void test_suite_div_rem(void) {
  * RETURN TO WOZMON BOOTLOADER
  * ============================================================================
  */
-void return_to_wozmon(void) {
-  print_string("\nTest suite execution finished.\nPress any key to jump to "
-               "Wozmon ROM (0x00000000)...");
+void return_to_bootloader(void) {
+  print_string("\nTest suite execution finished.\nPress any key to return to "
+               "Bootloader...");
   (void)read_key();
 
   bsp_exit();
@@ -1044,6 +1044,6 @@ int main(void) {
   }
   print_string("====================================================\n");
 
-  return_to_wozmon();
+  return_to_bootloader();
   return 0;
 }
